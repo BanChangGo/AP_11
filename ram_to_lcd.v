@@ -1,53 +1,80 @@
 `timescale 1ns / 10ps
 
-module ram_to_lcd(
-    input   wire        clk_i,          // 6.25MHz (Pixel Clock)
-    input   wire        iEnable,        // Frame Done (Active High)
+module ram_to_lcd #(
+    // 湲곕낯媛? (480x272)
+    parameter H_SYNC_W_D = 41,   // 40 -> 41 (?뜲?씠?꽣?떆?듃 ?몴以?)
+    parameter H_BACK_P_D = 2,
+    parameter H_ACTIVE_D = 478,
+    parameter H_FRONT_P_D = 4,   // ?쁾 異붽??맖
 
-    output  wire [16:0] ram_rd_addr_o,
-    input   wire [15:0] ram_rd_data_i,
+    parameter V_SYNC_W_D = 10,
+    parameter V_BACK_P_D = 2,
+    parameter V_ACTIVE_D = 272,
+    parameter V_FRONT_P_D = 2    // ?쁾 異붽??맖
+)(
+    input  wire        clk_i,
+    input  wire        iEnable,
 
-    output  wire        oLCD_Clk,       // LCD Pixel Clock
-    output  wire        LCD_hsync_o,
-    output  wire        LCD_vsync_o,
-    output  wire        LCD_de_o,       // Data Enable (중요!)
-    output  wire [4:0]  LCD_R_o,
-    output  wire [5:0]  LCD_G_o,
-    output  wire [4:0]  LCD_B_o
-    );
+    output wire [16:0] ram_rd_addr_o,
+    input  wire [15:0] ram_rd_data_i,
 
-    // ------------------------------------------------------------
-    // 1. 타이밍 파라미터 (480x272 해상도 기준)
-    // ------------------------------------------------------------
-    // Horizontal: Sync(40) + Back(2) + Active(480) = 522
-    localparam H_SYNC_W = 40;
-    localparam H_BACK_P = 2;
-    localparam H_ACTIVE = 480;
-    localparam H_TOTAL  = 522;
+    output wire        LCD_hsync_o,
+    output wire        LCD_vsync_o,
+    output wire [4:0]  LCD_R_o,
+    output wire [5:0]  LCD_G_o,
+    output wire [4:0]  LCD_B_o,
 
-    // Vertical: Sync(10) + Back(2) + Active(272) = 284
-    localparam V_SYNC_W = 10;
-    localparam V_BACK_P = 2;
-    localparam V_ACTIVE = 272;
-    localparam V_TOTAL  = 284;
+    // >>>>>>>>>>>>>>>>  ?윜? VIO 濡? ?떎?떆媛? ?엯?젰諛쏅뒗 Timing Ports  <<<<<<<<<<<<<<<<<<
+    input  wire [15:0] h_sync_w,
+    input  wire [15:0] h_back_p,
+    input  wire [15:0] h_active,
 
-    // ------------------------------------------------------------
-    // 2. 카운터 (Counter)
-    // ------------------------------------------------------------
-    reg [9:0] h_count;
-    reg [9:0] v_count;
+    input  wire [15:0] v_sync_w,
+    input  wire [15:0] v_back_p,
+    input  wire [15:0] v_active,
+    input  wire [15:0] h_front_p,
+    input  wire [15:0] v_front_p
+);
 
+    // --------------------------
+    // ?떎?젣 ?궗?슜?맆 ???씠諛? 媛? ?꽑?깮
+    // --------------------------
+    wire [15:0] H_SYNC_W = (h_sync_w  == 0) ? H_SYNC_W_D : h_sync_w;
+    wire [15:0] H_BACK_P = (h_back_p  == 0) ? H_BACK_P_D : h_back_p;
+    wire [15:0] H_ACTIVE = (h_active  == 0) ? H_ACTIVE_D : h_active;
+    // ?쁾 Front Porch 異붽? 諛? Total 怨꾩궛 ?닔?젙
+    wire [15:0] H_FRONT_P = (h_front_p == 0) ? H_FRONT_P_D : h_front_p; 
+    wire [15:0] H_TOTAL   = H_SYNC_W + H_BACK_P + H_ACTIVE + H_FRONT_P; 
+
+    wire [15:0] V_SYNC_W = (v_sync_w  == 0) ? V_SYNC_W_D : v_sync_w;
+    wire [15:0] V_BACK_P = (v_back_p  == 0) ? V_BACK_P_D : v_back_p;
+    wire [15:0] V_ACTIVE = (v_active  == 0) ? V_ACTIVE_D : v_active;
+    // ?쁾 Front Porch 異붽? 諛? Total 怨꾩궛 ?닔?젙
+    wire [15:0] V_FRONT_P = (v_front_p == 0) ? V_FRONT_P_D : v_front_p;
+    wire [15:0] V_TOTAL   = V_SYNC_W + V_BACK_P + V_ACTIVE + V_FRONT_P;
+
+    // --------------------------
+    // Counter
+    // --------------------------
+    reg [15:0] h_count = 0;
+    reg [15:0] v_count = 0;
+
+    reg hsync = 0;
+    reg vsync = 0;
+
+    // --------------------------
+    // Horizontal / Vertical Counter
+    // --------------------------
     always @(posedge clk_i) begin
         if (!iEnable) begin
             h_count <= 0;
             v_count <= 0;
         end else begin
-            // H Counter
-            if (h_count < H_TOTAL - 1)
+            if (h_count < H_TOTAL - 1) begin
                 h_count <= h_count + 1;
-            else begin
+            end else begin
                 h_count <= 0;
-                // V Counter
+
                 if (v_count < V_TOTAL - 1)
                     v_count <= v_count + 1;
                 else
@@ -56,63 +83,72 @@ module ram_to_lcd(
         end
     end
 
-    // ------------------------------------------------------------
-    // 3. 신호 생성 (Sync & Active Area)
-    // ------------------------------------------------------------
-    // Sync는 해당 구간(0~Sync폭)에서 Low(0) 또는 High(1)
-    // 여기서는 Active Low 방식(Low일 때 Sync)으로 가정
-    wire h_sync_curr = (h_count < H_SYNC_W) ? 1'b0 : 1'b1;
-    wire v_sync_curr = (v_count < V_SYNC_W) ? 1'b0 : 1'b1;
+    // --------------------------
+    // HSYNC / VSYNC ?깮?꽦
+    // --------------------------
+    always @(posedge clk_i) begin
+        hsync <= (h_count < H_SYNC_W) ? 0 : 1;
+        vsync <= (v_count < V_SYNC_W) ? 0 : 1;
+    end
 
-    // Active Area: Sync와 Back Porch를 지난 진짜 화면 구간
-    wire h_act = (h_count >= (H_SYNC_W + H_BACK_P)) && (h_count < (H_SYNC_W + H_BACK_P + H_ACTIVE));
-    wire v_act = (v_count >= (V_SYNC_W + V_BACK_P)) && (v_count < (V_SYNC_W + V_BACK_P + V_ACTIVE));
-    wire active_area = h_act && v_act;
+    reg hsync_d1, hsync_d2;
+    reg vsync_d1, vsync_d2;
 
-    // ------------------------------------------------------------
-    // 4. RAM 주소 생성
-    // ------------------------------------------------------------
-    reg [16:0] r_addr;
+    always @(negedge clk_i) begin
+        hsync_d1 <= hsync;
+        hsync_d2 <= hsync_d1;
+
+        vsync_d1 <= vsync;
+        vsync_d2 <= vsync_d1;
+    end
+
+    assign LCD_hsync_o = hsync_d2;
+    assign LCD_vsync_o = vsync_d2;
+
+    // --------------------------
+    // RAM READ ADDRESS
+    // --------------------------
+    reg [16:0] ram_rd_addr = 0;
+    localparam LATENCY_OFFSET = 2;
 
     always @(posedge clk_i) begin
-        if (!iEnable) begin
-            r_addr <= 0;
-        end else if (v_count == 0 && h_count == 0) begin
-            r_addr <= 0; // 매 프레임 시작시 리셋
-        end else if (active_area) begin
-            r_addr <= r_addr + 1; // 화면 유효 구간에서만 주소 증가
+        if (v_count < (V_SYNC_W + V_BACK_P)) begin
+            ram_rd_addr <= 0;
+        end else begin
+            // ★ 수정: Active 구간 시작보다 LATENCY_OFFSET 만큼 "미리" 주소를 증가시킵니다.
+            if ((h_count >= (H_SYNC_W + H_BACK_P - LATENCY_OFFSET)) && 
+                (h_count <  (H_SYNC_W + H_BACK_P + H_ACTIVE - LATENCY_OFFSET)) &&
+                (v_count >= (V_SYNC_W + V_BACK_P)) &&
+                (v_count <  (V_SYNC_W + V_BACK_P + V_ACTIVE))) begin
+                    
+                    ram_rd_addr <= ram_rd_addr + 1;
+            end
         end
     end
 
-    assign ram_rd_addr_o = r_addr;
+    assign ram_rd_addr_o = ram_rd_addr;
 
-    // ------------------------------------------------------------
-    // 5. 출력 파이프라인 (Delay Pipeline) - 중요!
-    // ------------------------------------------------------------
-    // RAM은 주소를 주고 데이터가 나오는데 1클럭(또는 2클럭) 걸림.
-    // 따라서 Sync 신호와 DE 신호도 똑같이 늦춰줘야 화면이 밀리지 않음.
-    
-    reg hsync_d, vsync_d, de_d;
-    reg [15:0] data_d;
+    // --------------------------
+    // Data Latching
+    // --------------------------
+    reg [15:0] pix_data;
 
     always @(posedge clk_i) begin
-        hsync_d <= h_sync_curr;
-        vsync_d <= v_sync_curr;
-        de_d    <= active_area;     // ★ 여기서 Active 구간 정보를 저장
-        data_d  <= ram_rd_data_i;   // RAM 데이터 래치
+        pix_data <= ram_rd_data_i;
     end
 
-    // ------------------------------------------------------------
-    // 6. 최종 출력 할당
-    // ------------------------------------------------------------
-    assign oLCD_Clk     = clk_i;    // 클럭 출력
-    assign LCD_hsync_o  = hsync_d;
-    assign LCD_vsync_o  = vsync_d;
-    assign LCD_de_o     = 1;     // ★ 계산된 DE 신호 출력 (무조건 1 아님!)
+    reg [4:0] lcd_r;
+    reg [5:0] lcd_g;
+    reg [4:0] lcd_b;
 
-    // DE가 1일 때(화면 구간)만 데이터 출력, 아니면 0 (Black)
-    assign LCD_R_o = (de_d) ? data_d[4:0]   : 5'd0;
-    assign LCD_G_o = (de_d) ? data_d[10:5]  : 6'd0;
-    assign LCD_B_o = (de_d) ? data_d[15:11] : 5'd0;
+    always @(negedge clk_i) begin
+    lcd_r <= pix_data[15:11]; // Red를 상위비트에서 꺼냄
+    lcd_g <= pix_data[10:5];  // Green
+    lcd_b <= pix_data[4:0];   // Blue를 하위비트에서 꺼냄
+    end
+
+    assign LCD_R_o = lcd_r;
+    assign LCD_G_o = lcd_g;
+    assign LCD_B_o = lcd_b;
 
 endmodule

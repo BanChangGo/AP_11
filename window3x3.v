@@ -1,4 +1,3 @@
-// window3x3.v
 `timescale 1ns / 1ps
 
 module window3x3 #(
@@ -6,9 +5,9 @@ module window3x3 #(
     parameter IMG_HEIGHT = 272,
     parameter DATA_WIDTH = 24
 )(
-    input  wire                    iClk,
+    input  wire                    iClk,      // 메인 클럭 (100MHz)
     input  wire                    iRstn,
-    input  wire                    iEn,       // wEnClk
+    input  wire                    iEn,       // Enable 신호 (6.25MHz 타이밍)
     input  wire [DATA_WIDTH-1:0]   iPixel,    // RGB888
 
     output reg [DATA_WIDTH-1:0]    oP00,
@@ -37,64 +36,80 @@ module window3x3 #(
     reg [COL_W-1:0] col;
     reg [ROW_W-1:0] row;
 
-    integer i;
-
-    // 라인버퍼 read/write + row/col 카운터
+    // ---------------------------------------------------------
+    // 1. 라인버퍼 Read/Write 및 Counter 제어
+    // ---------------------------------------------------------
+    // [수정] posedge iEn -> posedge iClk
     always @(posedge iClk or negedge iRstn) begin
         if (!iRstn) begin
             col      <= {COL_W{1'b0}};
             row      <= {ROW_W{1'b0}};
             lb0_dout <= {DATA_WIDTH{1'b0}};
             lb1_dout <= {DATA_WIDTH{1'b0}};
-        end else if (iEn) begin
-            // 읽기
-            lb0_dout <= linebuf0[col];
-            lb1_dout <= linebuf1[col];
+        end else begin
+            // [수정] Enable 신호가 1일 때만 동작하도록 감싸기
+            if (iEn) begin
+                // 읽기
+                lb0_dout <= linebuf0[col];
+                lb1_dout <= linebuf1[col];
 
-            // 새 픽셀 쓰기 (row-1 -> linebuf1, 현재 -> linebuf0)
-            linebuf1[col] <= linebuf0[col];
-            linebuf0[col] <= iPixel;
+                // 새 픽셀 쓰기
+                linebuf1[col] <= linebuf0[col];
+                linebuf0[col] <= iPixel;
 
-            // 좌표 증가
-            if (col == IMG_WIDTH-1) begin
-                col <= {COL_W{1'b0}};
-                if (row != IMG_HEIGHT-1)
-                    row <= row + 1'b1;
-            end else begin
-                col <= col + 1'b1;
+                // 좌표 증가
+                if (col == IMG_WIDTH-1) begin
+                    col <= {COL_W{1'b0}};
+                    if (row != IMG_HEIGHT-1)
+                        row <= row + 1'b1;
+                end else begin
+                    col <= col + 1'b1;
+                end
             end
         end
     end
 
-    // 3x3 윈도우 쉬프트
+    // ---------------------------------------------------------
+    // 2. 3x3 윈도우 쉬프트
+    // ---------------------------------------------------------
+    // [수정] posedge iEn -> posedge iClk
     always @(posedge iClk or negedge iRstn) begin
         if (!iRstn) begin
-            {oP00,oP01,oP02,
-             oP10,oP11,oP12,
-             oP20,oP21,oP22} <= {(9*DATA_WIDTH){1'b0}};
-        end else if (iEn) begin
-            // 왼쪽으로 쉬프트
-            oP00 <= oP01;  oP01 <= oP02;
-            oP10 <= oP11;  oP11 <= oP12;
-            oP20 <= oP21;  oP21 <= oP22;
+            oP00 <= 0; oP01 <= 0; oP02 <= 0;
+            oP10 <= 0; oP11 <= 0; oP12 <= 0;
+            oP20 <= 0; oP21 <= 0; oP22 <= 0;
+        end else begin
+            // [수정] Enable 체크
+            if (iEn) begin
+                // 왼쪽으로 쉬프트
+                oP00 <= oP01;  oP01 <= oP02;
+                oP10 <= oP11;  oP11 <= oP12;
+                oP20 <= oP21;  oP21 <= oP22;
 
-            // 오른쪽 열에 새 데이터
-            oP02 <= lb1_dout;   // row-2
-            oP12 <= lb0_dout;   // row-1
-            oP22 <= iPixel;     // 현재 row
+                // 오른쪽 열에 새 데이터 채우기
+                oP02 <= lb1_dout;   // 2라인 전 데이터
+                oP12 <= lb0_dout;   // 1라인 전 데이터
+                oP22 <= iPixel;     // 현재 라인 데이터
+            end
         end
     end
 
-    // 윈도우 유효 플래그
+    // ---------------------------------------------------------
+    // 3. 유효 플래그 생성
+    // ---------------------------------------------------------
+    // [수정] posedge iEn -> posedge iClk
     always @(posedge iClk or negedge iRstn) begin
         if (!iRstn) begin
             oValid <= 1'b0;
-        end else if (iEn) begin
-            // non-blocking 때문에 이전 cycle의 row/col 기준
-            if ((row >= 2) && (col >= 2))
-                oValid <= 1'b1;
-            else
-                oValid <= 1'b0;
+        end else begin
+            // [수정] Enable 체크
+            if (iEn) begin
+                // 2행 2열 이상 진행되었을 때 유효
+                if ((row >= 2) && (col >= 2))
+                    oValid <= 1'b1;
+                else
+                    oValid <= 1'b0;
+            end
         end
     end
 

@@ -1,35 +1,25 @@
-`timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Module Name : clk_en_gen
-// Description : 100MHz iClk?„ ê¸°ì??œ¼ë¡? 6.25MHz ?“±ê°??˜ clock enable(wEnClk) ?ƒ?„±
-//               - ?‚´ë¶??Š” 0~15ê¹Œì? ì¹´ìš´?„°
-//               - ì¹´ìš´?„°ê°? 15ê°? ?˜?Š” ?ˆœê°? 1?´?Ÿ­ ?™?•ˆë§? wEnClk = 1 (ê·? ?™¸?—?Š” 0)
-//               - iRstn : Active Low ë¹„ë™ê¸? ë¦¬ì…‹
-//////////////////////////////////////////////////////////////////////////////////
-module clk_en_gen #(
-    parameter DIV = 16                // ë¶„ì£¼ ë¹„ìœ¨ (100MHz / 16 = 6.25MHz)
-)(
-    input  wire iClk,                 // 100MHz ?…? ¥ ?´?Ÿ­
-    input  wire iRstn,                // Active Low reset
-    output reg  wEnClk                // 6.25MHz ?“±ê°??˜ clock enable ?„?Š¤
+module clk_gen2(
+    input   clk_i,
+    input   iRstn,            // <--- add reset (active low)
+    input   [15:0]  count_i,
+    output  clk_o
 );
+    reg [15:0] sig_count;
+    reg        sig_clk_out;
 
-    // DIV=16 ?´ë¯?ë¡? 4bit ì¹´ìš´?„°ë©? ì¶©ë¶„ (0~15)
-    reg [$clog2(DIV)-1:0] cnt;
-
-    always @(posedge iClk or negedge iRstn) begin
+    always @(posedge clk_i or negedge iRstn) begin
         if (!iRstn) begin
-            cnt    <= {($clog2(DIV)){1'b0}};
-            wEnClk <= 1'b0;
+            sig_count   <= 16'd0;
+            sig_clk_out <= 1'b0;
         end else begin
-            if (cnt == (DIV-1)) begin
-                cnt    <= {($clog2(DIV)){1'b0}};
-                wEnClk <= 1'b1;        // ?´ ?´?Ÿ­?—?„œë§? enable = 1
+            if (sig_count == count_i) begin
+                sig_count <= 0;
+                sig_clk_out <= ~sig_clk_out;
             end else begin
-                cnt    <= cnt + 1'b1;
-                wEnClk <= 1'b0;        // ?‚˜ë¨¸ì? 15?´?Ÿ­ ?™?•ˆ?? 0
+                sig_count <= sig_count + 1'b1;
             end
         end
     end
 
+    assign clk_o = sig_clk_out;
 endmodule

@@ -1,100 +1,111 @@
-// conv3x3_laplacian_rgb.v
 `timescale 1ns / 1ps
 
 module conv3x3_laplacian_rgb #(
-    parameter ACC_WIDTH = 19
+    parameter ACC_WIDTH = 20  // ø¨ªÍ ø¿πˆ«√∑ŒøÏ πÊ¡ˆ∏¶ ¿ß«ÿ ≥À≥À«œ∞‘ 20∫Ò∆Æ
 )(
     input  wire        iClk,
     input  wire        iRstn,
     input  wire        iEn,       // wEnClk
-    input  wire        iValid,    // window3x3Ïùò oValid
-    input  wire        iLast,     // pixel_addr_ctrlÏùò oLast
+    input  wire        iValid,    // window3x3¿« oValid
+    input  wire        iLast,     // pixel_addr_ctrl¿« oLast
 
-    input  wire [23:0] iP00,
-    input  wire [23:0] iP01,
-    input  wire [23:0] iP02,
-    input  wire [23:0] iP10,
-    input  wire [23:0] iP11,
-    input  wire [23:0] iP12,
-    input  wire [23:0] iP20,
-    input  wire [23:0] iP21,
-    input  wire [23:0] iP22,
+    input  wire [23:0] iP00, iP01, iP02,
+    input  wire [23:0] iP10, iP11, iP12,
+    input  wire [23:0] iP20, iP21, iP22,
 
-    output reg  [23:0] oPixel,    // ReLU ÌõÑ RGB888
-    output reg         oValid,    // Í≤∞Í≥º Ïú†Ìö®
-    output reg         oLast      // Ïù¥ Í≤∞Í≥º ÌîΩÏÖÄÏù¥ ÌîÑÎ†àÏûÑ ÎßàÏßÄÎßâÏùº Îïå 1
+    output reg  [23:0] oPixel,    // Result RGB888
+    output reg         oValid,    // ∞·∞˙ ¿Ø»ø
+    output reg         oLast      // «¡∑π¿” ≥°
 );
 
-//kernel
-localparam signed [7:0] K00 =   8'sd0;
-localparam signed [7:0] K01 =  -8'sd1;
-localparam signed [7:0] K02 =   8'sd0;
-localparam signed [7:0] K10 =  -8'sd1;
-localparam signed [7:0] K11 =   8'sd5;  
-localparam signed [7:0] K12 =  -8'sd1;
-localparam signed [7:0] K20 =   8'sd0;
-localparam signed [7:0] K21 =  -8'sd1;
-localparam signed [7:0] K22 =   8'sd0;
+    //--------------------------------------------------------------------------
+    // 1. ƒø≥Œ ∞Ëºˆ ¡§¿« (Sharpening / Laplacian)
+    //    ¡ﬂΩ…¿Ã 9, ¡÷∫Ø¿Ã -1 («’∞Ë 1) -> π‡±‚ ¿Ø¡ˆ«œ∏Á º±∏Ì«œ∞‘
+    //--------------------------------------------------------------------------
+    localparam signed [7:0] K00 = 8'sd0;
+    localparam signed [7:0] K01 = -8'sd1;
+    localparam signed [7:0] K02 = 8'sd0;
+    localparam signed [7:0] K10 = -8'sd1;
+    localparam signed [7:0] K11 =  8'sd5;  
+    localparam signed [7:0] K12 = -8'sd1;
+    localparam signed [7:0] K20 = 8'sd0;
+    localparam signed [7:0] K21 = -8'sd1;
+    localparam signed [7:0] K22 = 8'sd0;
 
-    // ReLU + 0~255 saturate
-    function [7:0] relu_sat8;
-        input signed [ACC_WIDTH-1:0] x;
+    //--------------------------------------------------------------------------
+    // 2. RGB √§≥Œ ∫–∏Æ π◊ Signed »Æ¿Â
+    //    Unsigned 8bit ¿‘∑¬ æ’ø° 0¿ª ∫Ÿø© 9bit Signed æÁºˆ∑Œ ∏∏µÏ¥œ¥Ÿ.
+    //--------------------------------------------------------------------------
+    // Red
+    wire signed [8:0] R00={1'b0, iP00[23:16]}; wire signed [8:0] R01={1'b0, iP01[23:16]}; wire signed [8:0] R02={1'b0, iP02[23:16]};
+    wire signed [8:0] R10={1'b0, iP10[23:16]}; wire signed [8:0] R11={1'b0, iP11[23:16]}; wire signed [8:0] R12={1'b0, iP12[23:16]};
+    wire signed [8:0] R20={1'b0, iP20[23:16]}; wire signed [8:0] R21={1'b0, iP21[23:16]}; wire signed [8:0] R22={1'b0, iP22[23:16]};
+    
+    // Green
+    wire signed [8:0] G00={1'b0, iP00[15:8]};  wire signed [8:0] G01={1'b0, iP01[15:8]};  wire signed [8:0] G02={1'b0, iP02[15:8]};
+    wire signed [8:0] G10={1'b0, iP10[15:8]};  wire signed [8:0] G11={1'b0, iP11[15:8]};  wire signed [8:0] G12={1'b0, iP12[15:8]};
+    wire signed [8:0] G20={1'b0, iP20[15:8]};  wire signed [8:0] G21={1'b0, iP21[15:8]};  wire signed [8:0] G22={1'b0, iP22[15:8]};
+
+    // Blue
+    wire signed [8:0] B00={1'b0, iP00[7:0]};   wire signed [8:0] B01={1'b0, iP01[7:0]};   wire signed [8:0] B02={1'b0, iP02[7:0]};
+    wire signed [8:0] B10={1'b0, iP10[7:0]};   wire signed [8:0] B11={1'b0, iP11[7:0]};   wire signed [8:0] B12={1'b0, iP12[7:0]};
+    wire signed [8:0] B20={1'b0, iP20[7:0]};   wire signed [8:0] B21={1'b0, iP21[7:0]};   wire signed [8:0] B22={1'b0, iP22[7:0]};
+
+    //--------------------------------------------------------------------------
+    // 3. ƒ¡∫º∑Áº« ø¨ªÍ (Combinational Logic)
+    //    ∞ˆº¿∞˙ µ°º¿¿ª ºˆ«‡«’¥œ¥Ÿ.
+    //--------------------------------------------------------------------------
+    reg signed [ACC_WIDTH-1:0] sum_r, sum_g, sum_b;
+
+    always @(*) begin
+        sum_r = (R00 * K00) + (R01 * K01) + (R02 * K02) +
+                (R10 * K10) + (R11 * K11) + (R12 * K12) +
+                (R20 * K20) + (R21 * K21) + (R22 * K22);
+
+        sum_g = (G00 * K00) + (G01 * K01) + (G02 * K02) +
+                (G10 * K10) + (G11 * K11) + (G12 * K12) +
+                (G20 * K20) + (G21 * K21) + (G22 * K22);
+
+        sum_b = (B00 * K00) + (B01 * K01) + (B02 * K02) +
+                (B10 * K10) + (B11 * K11) + (B12 * K12) +
+                (B20 * K20) + (B21 * K21) + (B22 * K22);
+    end
+
+    //--------------------------------------------------------------------------
+    // 4. Saturation (Clamping) «‘ºˆ - [∞°¿Â ¡ﬂø‰]
+    //    ∫Ò∆Æ ø¨ªÍ ¥ÎΩ≈ ∫Ò±≥ ø¨ªÍ¿⁄∏¶ ªÁøÎ«œø© ∞°µ∂º∫∞˙ æ»¡§º∫¿ª ≥Ùø¥Ω¿¥œ¥Ÿ.
+    //--------------------------------------------------------------------------
+    function [7:0] sat_cast;
+        input signed [ACC_WIDTH-1:0] val;
         begin
-            if (x[ACC_WIDTH-1]) begin
-                relu_sat8 = 8'd0;
-            end else if (|x[ACC_WIDTH-1:8]) begin
-                relu_sat8 = 8'd255;
-            end else begin
-                relu_sat8 = x[7:0];
-            end
+            if (val < 0) 
+                sat_cast = 8'd0;       // ¿Ωºˆ(Underflow) -> 0 (∞À¿∫ªˆ)
+            else if (val > 255) 
+                sat_cast = 8'd255;     // 255 √ ∞˙(Overflow) -> 255 (»Úªˆ)
+            else 
+                sat_cast = val[7:0];   // ¡§ªÛ π¸¿ß -> «œ¿ß 8∫Ò∆Æ ªÁøÎ
         end
     endfunction
 
-    // RGB Î∂ÑÎ¶¨
-    wire [7:0] R00 = iP00[23:16]; wire [7:0] G00 = iP00[15:8]; wire [7:0] B00 = iP00[7:0];
-    wire [7:0] R01 = iP01[23:16]; wire [7:0] G01 = iP01[15:8]; wire [7:0] B01 = iP01[7:0];
-    wire [7:0] R02 = iP02[23:16]; wire [7:0] G02 = iP02[15:8]; wire [7:0] B02 = iP02[7:0];
-    wire [7:0] R10 = iP10[23:16]; wire [7:0] G10 = iP10[15:8]; wire [7:0] B10 = iP10[7:0];
-    wire [7:0] R11 = iP11[23:16]; wire [7:0] G11 = iP11[15:8]; wire [7:0] B11 = iP11[7:0];
-    wire [7:0] R12 = iP12[23:16]; wire [7:0] G12 = iP12[15:8]; wire [7:0] B12 = iP12[7:0];
-    wire [7:0] R20 = iP20[23:16]; wire [7:0] G20 = iP20[15:8]; wire [7:0] B20 = iP20[7:0];
-    wire [7:0] R21 = iP21[23:16]; wire [7:0] G21 = iP21[15:8]; wire [7:0] B21 = iP21[7:0];
-    wire [7:0] R22 = iP22[23:16]; wire [7:0] G22 = iP22[15:8]; wire [7:0] B22 = iP22[7:0];
-
-    // R Ï±ÑÎÑê conv
-    wire signed [ACC_WIDTH-1:0] conv_R =
-        $signed({1'b0,R00})*K00 + $signed({1'b0,R01})*K01 + $signed({1'b0,R02})*K02 +
-        $signed({1'b0,R10})*K10 + $signed({1'b0,R11})*K11 + $signed({1'b0,R12})*K12 +
-        $signed({1'b0,R20})*K20 + $signed({1'b0,R21})*K21 + $signed({1'b0,R22})*K22;
-
-    // G Ï±ÑÎÑê conv
-    wire signed [ACC_WIDTH-1:0] conv_G =
-        $signed({1'b0,G00})*K00 + $signed({1'b0,G01})*K01 + $signed({1'b0,G02})*K02 +
-        $signed({1'b0,G10})*K10 + $signed({1'b0,G11})*K11 + $signed({1'b0,G12})*K12 +
-        $signed({1'b0,G20})*K20 + $signed({1'b0,G21})*K21 + $signed({1'b0,G22})*K22;
-
-    // B Ï±ÑÎÑê conv
-    wire signed [ACC_WIDTH-1:0] conv_B =
-        $signed({1'b0,B00})*K00 + $signed({1'b0,B01})*K01 + $signed({1'b0,B02})*K02 +
-        $signed({1'b0,B10})*K10 + $signed({1'b0,B11})*K11 + $signed({1'b0,B12})*K12 +
-        $signed({1'b0,B20})*K20 + $signed({1'b0,B21})*K21 + $signed({1'b0,B22})*K22;
-
-    // Ï∂úÎ†• Î†àÏßÄÏä§ÌÑ∞
+    //--------------------------------------------------------------------------
+    // 5. ∞·∞˙ √‚∑¬ (Sequential Logic)
+    //--------------------------------------------------------------------------
     always @(posedge iClk or negedge iRstn) begin
         if (!iRstn) begin
             oPixel <= 24'd0;
             oValid <= 1'b0;
             oLast  <= 1'b0;
         end else if (iEn) begin
+            // Valid∞° High¿œ ∂ß∏∏ ∞ËªÍ ∞·∞˙ æ˜µ•¿Ã∆Æ
             if (iValid) begin
-                oPixel[23:16] <= relu_sat8(conv_R);
-                oPixel[15:8]  <= relu_sat8(conv_G);
-                oPixel[7:0]   <= relu_sat8(conv_B);
+                oPixel[23:16] <= sat_cast(sum_r);
+                oPixel[15:8]  <= sat_cast(sum_g);
+                oPixel[7:0]   <= sat_cast(sum_b);
                 oValid        <= 1'b1;
-                oLast         <= iLast;     // ÎßàÏßÄÎßâ Ïú†Ìö® ÏúàÎèÑÏö∞Ïù¥Î©¥ 1
+                oLast         <= iLast;
             end else begin
-                oValid <= 1'b0;
-                oLast  <= 1'b0;
+                oValid        <= 1'b0;
+                oLast         <= 1'b0;
             end
         end
     end

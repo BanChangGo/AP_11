@@ -1,4 +1,21 @@
 `timescale 1ns/1ps
+/*********************************************************************************
+  - Project          : AP CNN Project
+  - File name        : OutBuf.v
+  - Description      : Frame Buffer (Dual Port RAM) for RGB565 video data.
+                       - Write Port : Converts {R5,G6,B5} to {B5,G6,R5} for LCD.
+                       - Read Port  : Standard memory read for Display.
+  - Timing (CRITICAL): 
+       1. Write Trigger : Data is written ONLY on the RISING EDGE of iValid_wr.
+                          (Logic: wValid_Pulse = iValid_wr & ~iValid_prev)
+       2. Data Sequence : To write multiple pixels, iValid_wr must toggle.
+                          (Sequence: High -> Low -> High -> Low ...)
+       3. Max Throughput: 1 Pixel per 2 Clocks (Due to toggle requirement).
+                          * Continuous 'High' on iValid_wr will write only ONCE.
+       4. Frame Reset   : Automatically resets address when (IMG_WIDTH * IMG_HEIGHT)
+                          pixels are written. External 'iLast_wr' is IGNORED.
+  - Revision history : 1) 2025.12.05 - Modified to Edge-Sensitive Write Logic
+*********************************************************************************/
 
 module OutBuf #(
     parameter IMG_WIDTH   = 480,
@@ -9,8 +26,8 @@ module OutBuf #(
     // Write side
     input  wire                   iClk_wr,      // 100MHz
     input  wire                   iRstn,        
-    input  wire                   iEn_wr,       // (»ç¿ë ¾È ÇÔ)
-    input  wire                   iValid_wr,    // CNN Valid ½ÅÈ£
+    input  wire                   iEn_wr,       // (ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½)
+    input  wire                   iValid_wr,    // CNN Valid ï¿½ï¿½È£
     input  wire                   iLast_wr,     
     input  wire [DATA_WIDTH-1:0]  iPixel_wr,    // CNN Data
 
@@ -25,8 +42,8 @@ module OutBuf #(
     localparam TOTAL_PIX = IMG_WIDTH * IMG_HEIGHT;
 
     // ------------------------------------------------------------
-    // 1. Valid ½ÅÈ£ Edge Detection (ÇÙ½É ¼öÁ¤!)
-    //    iValid_wr°¡ ¾Æ¹«¸® ±æ°Ô µé¾î¿Íµµ, ½ÃÀÛÇÏ´Â ¼ø°£ µü 1¹ø¸¸ µ¿ÀÛÇÏ°Ô ¸¸µì´Ï´Ù.
+    // 1. Valid ï¿½ï¿½È£ Edge Detection (ï¿½Ù½ï¿½ ï¿½ï¿½ï¿½ï¿½!)
+    //    iValid_wrï¿½ï¿½ ï¿½Æ¹ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Íµï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ 1ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ ï¿½ï¿½ï¿½ï¿½Ï´ï¿½.
     // ------------------------------------------------------------
     reg iValid_prev;
     always @(posedge iClk_wr or negedge iRstn) begin
@@ -34,12 +51,12 @@ module OutBuf #(
         else        iValid_prev <= iValid_wr;
     end
 
-    // »ó½Â ¿¡Áö(Rising Edge) °ËÃâ: 0ÀÌ¾ú´Ù°¡ 1ÀÌ µÈ ¼ø°£
+    // ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½(Rising Edge) ï¿½ï¿½ï¿½ï¿½: 0ï¿½Ì¾ï¿½ï¿½Ù°ï¿½ 1ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
     wire wValid_Pulse = iValid_wr & ~iValid_prev;
 
 
     // ------------------------------------------------------------
-    // 2. µ¥ÀÌÅÍ Á¶¸³
+    // 2. ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
     // ------------------------------------------------------------
     wire [4:0] R5 = iPixel_wr[15:11];
     wire [5:0] G6 = iPixel_wr[10:5];
@@ -58,8 +75,8 @@ module OutBuf #(
         end else begin
             oFrameDone <= 0; 
             
-            // [¼öÁ¤] iValid_wr ´ë½Å wValid_Pulse »ç¿ë!
-            // ÀÌÁ¦ Valid ½ÅÈ£°¡ ±æ¾îÁ®µµ ÁÖ¼Ò´Â µü 1Ä­¸¸ Áõ°¡ÇÕ´Ï´Ù.
+            // [ï¿½ï¿½ï¿½ï¿½] iValid_wr ï¿½ï¿½ï¿½ wValid_Pulse ï¿½ï¿½ï¿½!
+            // ï¿½ï¿½ï¿½ï¿½ Valid ï¿½ï¿½È£ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ö¼Ò´ï¿½ ï¿½ï¿½ 1Ä­ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Õ´Ï´ï¿½.
             if (wValid_Pulse) begin
                 if (wr_addr == TOTAL_PIX - 1) begin
                     wr_addr    <= 0;
@@ -76,14 +93,14 @@ module OutBuf #(
     // ------------------------------------------------------------
     (* ram_style = "block" *) reg [DATA_WIDTH-1:0] mem [0:TOTAL_PIX-1];
 
-    // ½Ã¹Ä·¹ÀÌ¼Ç¿ë ÃÊ±âÈ­
+    // ï¿½Ã¹Ä·ï¿½ï¿½Ì¼Ç¿ï¿½ ï¿½Ê±ï¿½È­
     integer i;
     initial begin
         for (i=0; i<TOTAL_PIX; i=i+1) mem[i] = 0;
     end
 
     always @(posedge iClk_wr) begin
-        // [¼öÁ¤] ¿©±âµµ wValid_Pulse »ç¿ë
+        // [ï¿½ï¿½ï¿½ï¿½] ï¿½ï¿½ï¿½âµµ wValid_Pulse ï¿½ï¿½ï¿½
         if (wValid_Pulse)
             mem[wr_addr] <= mem_wr_data;
     end

@@ -19,7 +19,7 @@ module cnn_laplacian_tft_top #(
 
     
 );
-    // VIO ?ï¿½ï¿½?ï¿½ï¿½ ?ï¿½ï¿½ï¿??? ?ï¿½ï¿½ï¿????ï¿½ï¿½?ï¿½ï¿½ ?ï¿½ï¿½?ï¿½ï¿½
+    // VIO ?ï¿½ï¿½?ï¿½ï¿½ ?ï¿½ï¿½ï¿½??? ?ï¿½ï¿½ï¿½????ï¿½ï¿½?ï¿½ï¿½ ?ï¿½ï¿½?ï¿½ï¿½
 
     wire [15:0] h_sync_w;
     wire [15:0] h_back_p;
@@ -56,8 +56,8 @@ module cnn_laplacian_tft_top #(
     );
     
 
-    // 100MHz -> 6.25MHz enable pulse ?ƒ?„±
-    reg [3:0] cnt_6p25;   // 16ë¶„ì£¼?š© 4bit ì¹´ìš´?„°
+    // 100MHz -> 6.25MHz enable pulse ?ï¿½ï¿½?ï¿½ï¿½
+    reg [3:0] cnt_6p25;   // 16ë¶„ì£¼?ï¿½ï¿½ 4bit ì¹´ìš´?ï¿½ï¿½
     reg       wEnClk_pulse;
 
     always @(posedge iClk_100 or negedge iRstn) begin
@@ -67,7 +67,7 @@ module cnn_laplacian_tft_top #(
         end else begin
             if (cnt_6p25 == 4'd15) begin
                 cnt_6p25     <= 4'd0;
-                wEnClk_pulse <= 1'b1;  // 1?´?Ÿ­ ?Ž„?Š¤ ë°œìƒ
+                wEnClk_pulse <= 1'b1;  // 1?ï¿½ï¿½?ï¿½ï¿½ ?ï¿½ï¿½?ï¿½ï¿½ ë°œìƒ
             end else begin
                 cnt_6p25     <= cnt_6p25 + 1'b1;
                 wEnClk_pulse <= 1'b0;
@@ -156,7 +156,7 @@ module cnn_laplacian_tft_top #(
     // -------------------------------------------------------------------------
     // 7) OutBuf : Clock Domain ï¿½ï¿½ï¿½ï¿½ (ï¿½ß¿ï¿½!)
     //    - Write: wEnClk
-    //    - Read : wEnClk (ï¿½ï¿½ wLCD_Clk_sq ï¿½ï¿½ï¿??? wEnClk ï¿½ï¿½ï¿???)
+    //    - Read : wEnClk (ï¿½ï¿½ wLCD_Clk_sq ï¿½ï¿½ï¿½??? wEnClk ï¿½ï¿½ï¿½???)
     // -------------------------------------------------------------------------
     wire [16:0] ram_rd_addr;
     wire [15:0] ram_rd_data;
@@ -177,7 +177,7 @@ module cnn_laplacian_tft_top #(
         .oFrameDone(frame_done),
 
         // Read side
-        .iClk_rd   (wEnClk), // ï¿½ï¿½ ï¿½ï¿½Å© ï¿½Ð¸ï¿½ ï¿½Ø°ï¿½: ï¿½ï¿½ï¿½ï¿½ Enable Å¬ï¿½ï¿½ ï¿½ï¿½ï¿???
+        .iClk_rd   (wEnClk), // ï¿½ï¿½ ï¿½ï¿½Å© ï¿½Ð¸ï¿½ ï¿½Ø°ï¿½: ï¿½ï¿½ï¿½ï¿½ Enable Å¬ï¿½ï¿½ ï¿½ï¿½ï¿½???
         .iAddr_rd  (ram_rd_addr),
         .oData_rd  (ram_rd_data)
     );
@@ -185,7 +185,7 @@ module cnn_laplacian_tft_top #(
 
 
     // -------------------------------------------------------------------------
-    // 8) ram_to_lcd : ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ wEnClk, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Å¬ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿??? wLCD_Clk_sq
+    // 8) ram_to_lcd : ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ wEnClk, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Å¬ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½??? wLCD_Clk_sq
     // -------------------------------------------------------------------------
     
     /*reg lcd_enable;
@@ -199,17 +199,17 @@ module cnn_laplacian_tft_top #(
     */
 
     ram_to_lcd #(
-       /* .H_SYNC_W_D(40),
+        .H_SYNC_W_D(40),
         .H_BACK_P_D(2),
         .H_ACTIVE_D(480),
         .V_SYNC_W_D(10),
         .V_BACK_P_D(2),
         .V_ACTIVE_D(272),
         .H_FRONT_P_D(2),
-        .V_FRONT_P_D(2)*/
+        .V_FRONT_P_D(2)
     ) u_ram_to_lcd (
         .clk_i(wEnClk_pulse),
-        //.iEnable(1'b1),
+        .iEnable(1'b1),
 
         .ram_rd_addr_o(ram_rd_addr),
         .ram_rd_data_i(ram_rd_data),
@@ -218,8 +218,8 @@ module cnn_laplacian_tft_top #(
         .LCD_vsync_o(LCD_vsync_o),
         .LCD_R_o(LCD_R_o),
         .LCD_G_o(LCD_G_o),
-        .LCD_B_o(LCD_B_o)
-        /*
+        .LCD_B_o(LCD_B_o),
+        
         .h_sync_w(h_sync_w),
         .h_back_p(h_back_p),
         .h_active(h_active),
@@ -229,11 +229,11 @@ module cnn_laplacian_tft_top #(
         .v_back_p(v_back_p),
         .v_active(v_active),
         .v_front_p(v_front_p)
-        */
+        
     );
 
     // ï¿½ï¿½ ï¿½Ù½ï¿½: LCD ï¿½ï¿½ï¿½ï¿½ ï¿½É¿ï¿½ï¿½ï¿½ ï¿½ç°¢ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ Å¬ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
-    // ï¿½ï¿½ï¿½ï¿½ï¿½Í´ï¿½ wEnClkï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Øºï¿½ï¿½ï¿½ï¿½ï¿½ï¿???, LCDï¿½ï¿½ wLCD_Clk_sqï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    // ï¿½ï¿½ï¿½ï¿½ï¿½Í´ï¿½ wEnClkï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Øºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½???, LCDï¿½ï¿½ wLCD_Clk_sqï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     assign lcd_clk = wEnClk; 
 
     assign TFT_BACKLIGHT = 1'b1;

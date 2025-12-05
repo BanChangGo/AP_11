@@ -1,3 +1,19 @@
+/*********************************************************************************
+  - Project          : AP CNN Project
+  - File name        : clk_en_gen.v (Module: clk_gen2)
+  - Description      : Clock Divider / Generator
+                       Generates a slower clock (50% duty cycle) from clk_i.
+                       The output toggles whenever the internal counter reaches count_i.
+  - Timing           : 
+       1. Toggle Interval : (count_i + 1) cycles of clk_i
+       2. Output Period   : 2 * (count_i + 1) cycles of clk_i
+       3. Output Freq     : F_clk_i / ( 2 * (count_i + 1) )
+       [Example] If clk_i = 100MHz, count_i = 49
+                 -> Toggle every 50 cycles (0.5us)
+                 -> Period = 100 cycles (1.0us)
+                 -> clk_o = 1MHz
+  - Revision history : 1) 2025.12.05 - Initial Release (Added Active-Low Reset)
+*********************************************************************************/
 module clk_gen2(
     input   clk_i,
     input   iRstn,            // <--- add reset (active low)

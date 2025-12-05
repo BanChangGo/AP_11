@@ -24,6 +24,7 @@ module InBuf #(
     end
 
     // ✅ Block Memory Generator IP (BRAM)
+    // simple RAM 24 * 131072
     InputMemory_RGB888 u_InputMemory_RGB888 (
         .clka  (iClk),           // 항상 100MHz
         .ena   (1'b1),            // <= wEnClk

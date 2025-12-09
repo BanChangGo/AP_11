@@ -117,9 +117,25 @@ module cnn_laplacian_tft_top #(
         end
     end
 
+    // -------------------------------------------------------------------------
+    // [수정] Processing Start Control (VSYNC 감지)
+    // -------------------------------------------------------------------------
+    // 리셋 직후 바로 읽지 않고, 카메라가 첫 프레임(VSYNC)을 시작하면 그때부터 읽기를 허용합니다.
+    reg start_processing;
+    // 이후 FSM 으로  수정할 수 있는 신호 
+    
+    always @(posedge PL_CLK_100MHZ or negedge iRstn) begin
+        if (!iRstn) begin
+            start_processing <= 1'b0;
+        end else begin
+            // 카메라 VSYNC(프레임 시작 신호)가 한번이라도 들어오면 시작 플래그를 1로 고정
+            if (cam_wr_addr_w) 
+                start_processing <= 1'b1;
+        end
+    end
 
     // -------------------------------------------------------------------------
-    // 2) pixel_addr_ctrl
+    // 2) pixel_addr_ctrl (수정됨)
     // -------------------------------------------------------------------------
     localparam TOTAL_PIX = IMG_WIDTH * IMG_HEIGHT;
 
@@ -130,7 +146,7 @@ module cnn_laplacian_tft_top #(
         if (!iRstn) begin
             src_addr <= 17'd0;
             src_last <= 1'b0;
-        end else if (wEnClk_pulse) begin
+        end else if (wEnClk_pulse && start_processing) begin // [수정] start_processing 조건 추가
             if (src_addr == TOTAL_PIX - 1) begin
                 src_addr <= 17'd0;
                 src_last <= 1'b1;
@@ -140,9 +156,9 @@ module cnn_laplacian_tft_top #(
             end
         end else begin
             src_last <= 1'b0;
+            // start_processing이 0일 때는 src_addr이 0에서 대기
         end
     end
-
     // -------------------------------------------------------------------------
     // 3) InBuf
     // -------------------------------------------------------------------------
@@ -262,16 +278,7 @@ module cnn_laplacian_tft_top #(
     end
     */
 
-    ram_to_lcd #(
-        .H_SYNC_W_D(40),
-        .H_BACK_P_D(2),
-        .H_ACTIVE_D(480),
-        .V_SYNC_W_D(10),
-        .V_BACK_P_D(2),
-        .V_ACTIVE_D(272),
-        .H_FRONT_P_D(2),
-        .V_FRONT_P_D(2)
-    ) u_ram_to_lcd (
+    ram_to_lcd u_ram_to_lcd (
         .clk_i(wEnClk_pulse),
         //.iEnable(1'b1),
 

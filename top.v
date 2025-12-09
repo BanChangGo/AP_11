@@ -73,6 +73,24 @@ module cnn_laplacian_tft_top #(
         .clk_o(CAMERA_MCLK)
     );//25MHz
 
+    //// CAM PL
+    wire                        clk_campower        ;
+    
+    clk_gen2    I2C_RESET(
+        .clk_i                      (CAMERA_MCLK       ),
+        .count_i                    (16'h0064       ),
+        .clk_o                      (clk_campower   )
+    );
+    
+    cam_i2c CAM_SETUP_SCCB(
+        .clk_i                      (clk_campower   ),
+        .sw                         (1'b1           ),
+        .cam_rst_no                 (CAMERA_RESETn     ),
+        .cam_pwdn                   (CAMERA_PWDN       ),
+        .cam_scl                    (CAMERA_SCCB_SCL   ),
+        .cam_sda                    (CAMERA_SCCB_SDA   )      
+    );
+
     // 100MHz -> 6.25MHz enable pulse ?��?��
     reg [3:0] cnt_6p25;   // 16분주?�� 4bit 카운?��
     reg       wEnClk_pulse;

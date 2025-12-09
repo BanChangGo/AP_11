@@ -17,6 +17,8 @@ module cnn_laplacian_tft_top_tb;
     reg         CAMERA_HSYNC;
     reg         CAMERA_VSYNC;
     reg [7:0]   CAMERA_DATA;
+    
+    // Inout Ports (I2C)
     wire        CAMERA_SCCB_SCL;
     wire        CAMERA_SCCB_SDA;
 
@@ -35,7 +37,7 @@ module cnn_laplacian_tft_top_tb;
     wire        TFT_HSYNC;
     wire        TFT_VSYNC;
 
-    // SCCB Pull-ups (I2C simulation)
+    // SCCB Pull-ups (I2C Simulation)
     assign (weak1, weak0) CAMERA_SCCB_SCL = 1'b1;
     assign (weak1, weak0) CAMERA_SCCB_SDA = 1'b1;
 
@@ -78,16 +80,16 @@ module cnn_laplacian_tft_top_tb;
     initial PL_CLK_100MHZ = 0;
     always #5 PL_CLK_100MHZ = ~PL_CLK_100MHZ;
 
-    // Camera Pixel Clock: 25MHz (Period 40ns) - 모사
+    // Camera Pixel Clock: 24MHz ~ 25MHz (Period ~40ns) - 모사
+    // PCLK는 FPGA가 주는게 아니라 카메라가 주는 것(Master Mode 기준)
     initial CAMERA_PCLK = 0;
-    always #20 CAMERA_PCLK = ~CAMERA_PCLK;
+    always #20 CAMERA_PCLK = ~CAMERA_PCLK; 
 
     // -----------------------------------------------------------
     // 4. VIO Signal Force (Simulation Only)
-    //    Top 모듈에 VIO가 있어서 시뮬레이션 시 Z 상태가 될 수 있음.
-    //    이를 방지하기 위해 강제로 0으로 고정하여 Default Parameter 사용 유도.
     // -----------------------------------------------------------
     initial begin
+        // VIO가 시뮬레이션에서 'Z'로 뜨는 것을 방지
         force uut.h_sync_w = 16'd0;
         force uut.h_back_p = 16'd0;
         force uut.h_active = 16'd0;
@@ -103,7 +105,7 @@ module cnn_laplacian_tft_top_tb;
     // -----------------------------------------------------------
     integer h, v;
     
-    // Camera Timing Parameters (Simulation용 간소화)
+    // Camera Timing Parameters (Simulation용)
     localparam CAM_H_SYNC  = 10;
     localparam CAM_H_BACK  = 10;
     localparam CAM_H_ACT   = IMG_WIDTH;  // 480
@@ -114,7 +116,7 @@ module cnn_laplacian_tft_top_tb;
     localparam CAM_V_BACK  = 2;
     localparam CAM_V_ACT   = IMG_HEIGHT; // 272
     localparam CAM_V_FRONT = 2;
-    localparam CAM_V_TOTAL = CAM_V_SYNC + CAM_V_BACK + CAM_V_ACT + CAM_V_FRONT;
+    // localparam CAM_V_TOTAL = CAM_V_SYNC + CAM_V_BACK + CAM_V_ACT + CAM_V_FRONT;
 
     initial begin
         // 초기화
@@ -132,15 +134,15 @@ module cnn_laplacian_tft_top_tb;
         // -------------------------------------------------------
         repeat (3) begin // 3 프레임 전송 시뮬레이션
             
-            // VSYNC Start (Active High 가정 - 카메라마다 다를 수 있음, 보통 High Pulse)
+            // 1. VSYNC Start (Active High)
             CAMERA_VSYNC = 1;
             repeat (CAM_V_SYNC * CAM_H_TOTAL) @(posedge CAMERA_PCLK); 
             CAMERA_VSYNC = 0;
 
-            // V Back Porch
+            // 2. V Back Porch
             repeat (CAM_V_BACK * CAM_H_TOTAL) @(posedge CAMERA_PCLK);
 
-            // Active Lines
+            // 3. Active Lines
             for (v = 0; v < CAM_V_ACT; v = v + 1) begin
                 
                 // HSYNC (Active High)
@@ -152,23 +154,19 @@ module cnn_laplacian_tft_top_tb;
                 repeat (CAM_H_BACK) @(posedge CAMERA_PCLK);
 
                 // ** Active Pixel Data Sending **
+                // [중요 수정] camera_to_ram 모듈은 2 Cycle을 1 Pixel로 인식합니다. (RGB565)
+                // 따라서 3번 보내는게 아니라 2번 보내야 합니다.
                 for (h = 0; h < CAM_H_ACT; h = h + 1) begin
-                    // 1 Pixel = 2 Bytes (RGB565) or 1 Byte (Raw)?
-                    // Top 모듈의 camera_to_ram 입력이 8bit이므로, 
-                    // RGB888 24bit를 보내려면 3 Cycle, RGB565라면 2 Cycle이 필요할 수 있음.
-                    // *가정*: camera_to_ram이 24bit 구성을 위해 3Byte를 받는다고 가정하고 테스트 패턴 전송
                     
-                    // R Byte
-                    CAMERA_DATA = h[7:0]; 
+                    // [Cycle 1] High Byte (R5 G3)
+                    // 예: R=Red, G=Green -> 붉은색과 초록색이 섞인 패턴
+                    CAMERA_DATA = 8'hF8; // Red Max
                     @(posedge CAMERA_PCLK);
                     
-                    // G Byte (임의)
-                    CAMERA_DATA = v[7:0]; 
+                    // [Cycle 2] Low Byte (G3 B5)
+                    CAMERA_DATA = 8'h1F; // Blue Max
                     @(posedge CAMERA_PCLK);
                     
-                    // B Byte (임의)
-                    CAMERA_DATA = 8'hFF;  
-                    @(posedge CAMERA_PCLK);
                 end
 
                 // Data Invalid zone
@@ -178,7 +176,7 @@ module cnn_laplacian_tft_top_tb;
                 repeat (CAM_H_FRONT) @(posedge CAMERA_PCLK);
             end
 
-            // V Front Porch
+            // 4. V Front Porch
             repeat (CAM_V_FRONT * CAM_H_TOTAL) @(posedge CAMERA_PCLK);
 
             $display("Frame Sent at time %t", $time);
@@ -187,15 +185,5 @@ module cnn_laplacian_tft_top_tb;
         #10000;
         $finish;
     end
-
-    // -----------------------------------------------------------
-    // 6. Monitor
-    // -----------------------------------------------------------
-    /*
-    initial begin
-        $monitor("Time=%t | RST=%b | CamMCLK=%b | TFT_DE=%b | RGB=%h %h %h", 
-                 $time, iRstn, CAMERA_MCLK, TFT_DE, TFT_R_DATA, TFT_G_DATA, TFT_B_DATA);
-    end
-    */
 
 endmodule

@@ -70,6 +70,7 @@ module cnn_laplacian_tft_top #(
     clk_gen2    CLK_GEN_MAIN(
         .clk_i(PL_CLK_100MHZ),
         .count_i(16'h0001),
+        .iRstn(iRstn),
         .clk_o(CAMERA_MCLK)
     );//25MHz
 
@@ -79,6 +80,7 @@ module cnn_laplacian_tft_top #(
     clk_gen2    I2C_RESET(
         .clk_i                      (CAMERA_MCLK       ),
         .count_i                    (16'h0064       ),
+        .iRstn(iRstn),
         .clk_o                      (clk_campower   )
     );
     
@@ -266,7 +268,7 @@ module cnn_laplacian_tft_top #(
         .V_FRONT_P_D(2)
     ) u_ram_to_lcd (
         .clk_i(wEnClk_pulse),
-        .iEnable(1'b1),
+        //.iEnable(1'b1),
 
         .ram_rd_addr_o(ram_rd_addr),
         .ram_rd_data_i(ram_rd_data),
@@ -275,18 +277,9 @@ module cnn_laplacian_tft_top #(
         .LCD_vsync_o(TFT_VSYNC),
         .LCD_R_o(TFT_R_DATA),
         .LCD_G_o(TFT_G_DATA),
-        .LCD_B_o(TFT_B_DATA),
+        .LCD_B_o(TFT_B_DATA)
 
-        .h_sync_w(h_sync_w),
-        .h_back_p(h_back_p),
-        .h_active(h_active),
-        .h_front_p(h_front_p),
-
-        .v_sync_w(v_sync_w),
-        .v_back_p(v_back_p),
-        .v_active(v_active),
-        .v_front_p(v_front_p)
-        
+         
     );
 
     // �� �ٽ�: LCD ���� �ɿ��� �簢�� ���� Ŭ���� ���� ����

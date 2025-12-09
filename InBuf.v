@@ -44,8 +44,9 @@ module InBuf #(
         .wea   (iWe_wr),
         .addra (iAddr_wr),
         .dina  (iData_wr),
-        
+        .ena   (1'b1),
         // Port B (Read)
+        .enb   (1'b1),
         .clkb  (iClk_rd),
         .addrb (iAddr_rd),
         .doutb (bram_dout_b)   // BRAM 출력 -> 내부 와이어로 연결

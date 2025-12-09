@@ -9,7 +9,7 @@ module camera_to_ram(
     input   [7:0]   cam_data_i,
     output          ram_wr_en_o,
     output  [16:0]  ram_wr_addr_o,
-    output  [15:0]  ram_wr_data_o
+    output  [23:0]  ram_wr_data_o
     );
     
     localparam sig_v_count_max_real = 272;
@@ -141,6 +141,11 @@ module camera_to_ram(
     
     assign ram_wr_en_o = sig_ram_wr_en;
     assign ram_wr_addr_o = sig_ram_wr_addr;
-    assign ram_wr_data_o = sig_ram_wr_data;
+    
+    assign ram_wr_data_o = { 
+        sig_ram_wr_data[15:11], 3'b0,   // Red
+        sig_ram_wr_data[10:5],  2'b0,   // Green
+        sig_ram_wr_data[4:0],   3'b0    // Blue
+    };
     
 endmodule

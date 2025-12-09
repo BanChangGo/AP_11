@@ -43,6 +43,11 @@ module cnn_laplacian_tft_top #(
     wire [15:0] v_active;
     wire [15:0] v_front_p;
 
+    wire    cam_wr_en_w;
+
+    wire    [23:0]    cam_wr_data_w;
+    wire    [16:0]    cam_wr_addr_w;
+
 
     vio_0 u_vio(
         .clk(PL_CLK_100MHZ),

@@ -142,10 +142,7 @@ module camera_to_ram(
     assign ram_wr_en_o = sig_ram_wr_en;
     assign ram_wr_addr_o = sig_ram_wr_addr;
     
-    assign ram_wr_data_o = { 
-        sig_ram_wr_data[15:11], 3'b0,   // Red
-        sig_ram_wr_data[10:5],  2'b0,   // Green
-        sig_ram_wr_data[4:0],   3'b0    // Blue
-    };
+    // [수정] 비트 확장 없이 그대로 16bit 출력
+    assign ram_wr_data_o = sig_ram_wr_data;
     
 endmodule

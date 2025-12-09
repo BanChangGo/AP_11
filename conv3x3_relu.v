@@ -1,69 +1,106 @@
 `timescale 1ns / 1ps
 
 module conv3x3_laplacian_rgb #(
-    parameter ACC_WIDTH = 20  // ¿¬»ê ¿À¹öÇÃ·Î¿ì ¹æÁö¸¦ À§ÇØ ³Ë³ËÇÏ°Ô 20ºñÆ®
+    parameter ACC_WIDTH = 20  // ì—°ì‚° ì˜¤ë²„í”Œë¡œìš° ë°©ì§€ë¥¼ ìœ„í•´ ë„‰ë„‰í•˜ê²Œ 20ë¹„íŠ¸
 )(
     input  wire        iClk,
     input  wire        iRstn,
-    input  wire        iEn,       // wEnClk
-    input  wire        iValid,    // window3x3ÀÇ oValid
-    input  wire        iLast,     // pixel_addr_ctrlÀÇ oLast
+    input  wire        iEn,
+    input  wire        iValid,
+    input  wire        iLast,
+    
+    // [ì¶”ê°€] ëª¨ë“œ ì„ íƒ ì‹ í˜¸ (0: Bypass, 1: Sharpen, 2: Edge Detect)
+    input  wire [1:0]  iMode,
 
-    // [¼öÁ¤] 9°³ÀÇ ÀÔ·Â -> 1°³ÀÇ Å« ÀÔ·Â
     input  wire [24*9-1:0] iWindow,
 
-    output reg  [23:0] oPixel,    // Result RGB888
-    output reg         oValid,    // °á°ú À¯È¿
-    output reg         oLast      // ÇÁ·¹ÀÓ ³¡
+    output reg  [23:0] oPixel,
+    output reg         oValid,
+    output reg         oLast
 );
 
-    // [ÇÙ½É] Å« ¹ö½º¸¦ ´Ù½Ã 9°³ÀÇ ¿ÍÀÌ¾î·Î ÂÉ°³±â (Unpacking)
+    // 1. ë°ì´í„° ì–¸íŒ¨í‚¹ (Unpacking)
     wire [23:0] iP00, iP01, iP02;
     wire [23:0] iP10, iP11, iP12;
     wire [23:0] iP20, iP21, iP22;
 
-    // window ¸ğµâ¿¡¼­ ¹­¾ú´ø ¼ø¼­ ±×´ë·Î ´Ù½Ã Ç®¸é µË´Ï´Ù.
     assign {iP00, iP01, iP02,
             iP10, iP11, iP12,
             iP20, iP21, iP22} = iWindow;
 
+    //--------------------------------------------------------------------------
+    // 2. [ìˆ˜ì •] ì»¤ë„ ê³„ìˆ˜ ì„ íƒ ë¡œì§ (MUX)
+    //    localparam ëŒ€ì‹  regë¡œ ì„ ì–¸í•˜ì—¬ iModeì— ë”°ë¼ ê°’ì„ ë°”ê¿‰ë‹ˆë‹¤.
+    //--------------------------------------------------------------------------
+    reg signed [7:0] K00, K01, K02;
+    reg signed [7:0] K10, K11, K12;
+    reg signed [7:0] K20, K21, K22;
+
+    always @(*) begin
+        case (iMode)
+            //------------------------------------------------------
+            // Mode 0: Bypass (ì›ë³¸ ê·¸ëŒ€ë¡œ ì¶œë ¥)
+            // ì¤‘ì‹¬ë§Œ 1, ë‚˜ë¨¸ì§€ëŠ” 0
+            //------------------------------------------------------
+            2'b00: begin
+                K00 = 0; K01 = 0; K02 = 0;
+                K10 = 0; K11 = 1; K12 = 0;
+                K20 = 0; K21 = 0; K22 = 0;
+            end
+
+            //------------------------------------------------------
+            // Mode 1: Sharpening (ì„ ëª…í•˜ê²Œ)
+            // ì›ë³¸ ìƒ‰ìƒì„ ìœ ì§€í•˜ë©´ì„œ ì—£ì§€ë¥¼ ê°•ì¡° (ì»¤ë„ í•© = 1)
+            // [ 0 -1  0]
+            // [-1  5 -1]
+            // [ 0 -1  0]
+            //------------------------------------------------------
+            2'b01: begin
+                K00 =  0; K01 = -1; K02 =  0;
+                K10 = -1; K11 =  5; K12 = -1;
+                K20 =  0; K21 = -1; K22 =  0;
+            end
+
+            //------------------------------------------------------
+            // Mode 2: Edge Detection (Laplacian)
+            // ë°°ê²½ì€ ê²€ê²Œ, ì—£ì§€ë§Œ ìƒ‰ìƒ í‘œì‹œ (ì»¤ë„ í•© = 0)
+            // [-1 -1 -1]
+            // [-1  9 -1]
+            // [-1 -1 -1]
+            //------------------------------------------------------
+            2'b10: begin
+                K00 =  -1; K01 = -1; K02 = -1;
+                K10 = -1;  K11 =  9; K12 = -1;
+                K20 =  -1; K21 = -1; K22 = -1;
+            end
+
+            // Default: Bypass
+            default: begin
+                K00 = 0; K01 = 0; K02 = 0;
+                K10 = 0; K11 = 1; K12 = 0;
+                K20 = 0; K21 = 0; K22 = 0;
+            end
+        endcase
+    end
 
     //--------------------------------------------------------------------------
-    // 1. Ä¿³Î °è¼ö Á¤ÀÇ (Sharpening / Laplacian)
-    //    Áß½ÉÀÌ 9, ÁÖº¯ÀÌ -1 (ÇÕ°è 1) -> ¹à±â À¯ÁöÇÏ¸ç ¼±¸íÇÏ°Ô
+    // 3. RGB ì±„ë„ ë¶„ë¦¬ ë° Signed í™•ì¥ (ê¸°ì¡´ê³¼ ë™ì¼)
     //--------------------------------------------------------------------------
-    localparam signed [7:0] K00 = 8'sd0;
-    localparam signed [7:0] K01 = 8'sd0;
-    localparam signed [7:0] K02 = 8'sd0;;
-    localparam signed [7:0] K10 = 8'sd0;
-    localparam signed [7:0] K11 = 8'sd1;  
-    localparam signed [7:0] K12 = 8'sd0;
-    localparam signed [7:0] K20 = 8'sd0;
-    localparam signed [7:0] K21 = 8'sd0;
-    localparam signed [7:0] K22 = 8'sd0;
-
-    //--------------------------------------------------------------------------
-    // 2. RGB Ã¤³Î ºĞ¸® ¹× Signed È®Àå
-    //    Unsigned 8bit ÀÔ·Â ¾Õ¿¡ 0À» ºÙ¿© 9bit Signed ¾ç¼ö·Î ¸¸µì´Ï´Ù.
-    //--------------------------------------------------------------------------
-    // Red
     wire signed [8:0] R00={1'b0, iP00[23:16]}; wire signed [8:0] R01={1'b0, iP01[23:16]}; wire signed [8:0] R02={1'b0, iP02[23:16]};
     wire signed [8:0] R10={1'b0, iP10[23:16]}; wire signed [8:0] R11={1'b0, iP11[23:16]}; wire signed [8:0] R12={1'b0, iP12[23:16]};
     wire signed [8:0] R20={1'b0, iP20[23:16]}; wire signed [8:0] R21={1'b0, iP21[23:16]}; wire signed [8:0] R22={1'b0, iP22[23:16]};
     
-    // Green
     wire signed [8:0] G00={1'b0, iP00[15:8]};  wire signed [8:0] G01={1'b0, iP01[15:8]};  wire signed [8:0] G02={1'b0, iP02[15:8]};
     wire signed [8:0] G10={1'b0, iP10[15:8]};  wire signed [8:0] G11={1'b0, iP11[15:8]};  wire signed [8:0] G12={1'b0, iP12[15:8]};
     wire signed [8:0] G20={1'b0, iP20[15:8]};  wire signed [8:0] G21={1'b0, iP21[15:8]};  wire signed [8:0] G22={1'b0, iP22[15:8]};
 
-    // Blue
     wire signed [8:0] B00={1'b0, iP00[7:0]};   wire signed [8:0] B01={1'b0, iP01[7:0]};   wire signed [8:0] B02={1'b0, iP02[7:0]};
     wire signed [8:0] B10={1'b0, iP10[7:0]};   wire signed [8:0] B11={1'b0, iP11[7:0]};   wire signed [8:0] B12={1'b0, iP12[7:0]};
     wire signed [8:0] B20={1'b0, iP20[7:0]};   wire signed [8:0] B21={1'b0, iP21[7:0]};   wire signed [8:0] B22={1'b0, iP22[7:0]};
 
     //--------------------------------------------------------------------------
-    // 3. ÄÁº¼·ç¼Ç ¿¬»ê (Combinational Logic)
-    //    °ö¼À°ú µ¡¼ÀÀ» ¼öÇàÇÕ´Ï´Ù.
+    // 4. ì»¨ë³¼ë£¨ì…˜ ì—°ì‚° (ê¸°ì¡´ê³¼ ë™ì¼)
+    //    ìœ„ì—ì„œ ì„ íƒëœ Kxx ê°’ë“¤ê³¼ ê³±ì…ˆ ìˆ˜í–‰
     //--------------------------------------------------------------------------
     reg signed [ACC_WIDTH-1:0] sum_r, sum_g, sum_b;
 
@@ -82,23 +119,22 @@ module conv3x3_laplacian_rgb #(
     end
 
     //--------------------------------------------------------------------------
-    // 4. Saturation (Clamping) ÇÔ¼ö - [°¡Àå Áß¿ä]
-    //    ºñÆ® ¿¬»ê ´ë½Å ºñ±³ ¿¬»êÀÚ¸¦ »ç¿ëÇÏ¿© °¡µ¶¼º°ú ¾ÈÁ¤¼ºÀ» ³ô¿´½À´Ï´Ù.
+    // 5. Saturation í•¨ìˆ˜ (ê¸°ì¡´ê³¼ ë™ì¼)
     //--------------------------------------------------------------------------
     function [7:0] sat_cast;
         input signed [ACC_WIDTH-1:0] val;
         begin
             if (val < 0) 
-                sat_cast = 8'd0;       // À½¼ö(Underflow) -> 0 (°ËÀº»ö)
+                sat_cast = 8'd0;
             else if (val > 255) 
-                sat_cast = 8'd255;     // 255 ÃÊ°ú(Overflow) -> 255 (Èò»ö)
+                sat_cast = 8'd255;
             else 
-                sat_cast = val[7:0];   // Á¤»ó ¹üÀ§ -> ÇÏÀ§ 8ºñÆ® »ç¿ë
+                sat_cast = val[7:0];
         end
     endfunction
 
     //--------------------------------------------------------------------------
-    // 5. °á°ú Ãâ·Â (Sequential Logic)
+    // 6. ê²°ê³¼ ì¶œë ¥ (ê¸°ì¡´ê³¼ ë™ì¼)
     //--------------------------------------------------------------------------
     always @(posedge iClk or negedge iRstn) begin
         if (!iRstn) begin
@@ -106,7 +142,6 @@ module conv3x3_laplacian_rgb #(
             oValid <= 1'b0;
             oLast  <= 1'b0;
         end else if (iEn) begin
-            // Valid°¡ HighÀÏ ¶§¸¸ °è»ê °á°ú ¾÷µ¥ÀÌÆ®
             if (iValid) begin
                 oPixel[23:16] <= sat_cast(sum_r);
                 oPixel[15:8]  <= sat_cast(sum_g);

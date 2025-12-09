@@ -6,7 +6,7 @@ module cnn_laplacian_tft_top #(
 )(
     input  wire        PL_CLK_100MHZ,
     input  wire        iRstn,
-
+    //input  wire [1:0]  iMode,
 
     output wire [4:0]  TFT_R_DATA,
     output wire [5:0]  TFT_G_DATA,
@@ -33,7 +33,8 @@ module cnn_laplacian_tft_top #(
     output wire            CAMERA_MCLK
 );
     // VIO ?��?�� ?���??? ?���????��?�� ?��?��
-
+    
+   
     wire [15:0] h_sync_w;
     wire [15:0] h_back_p;
     wire [15:0] h_front_p;
@@ -45,7 +46,7 @@ module cnn_laplacian_tft_top #(
 
     wire    cam_wr_en_w;
 
-    wire    [23:0]    cam_wr_data_w;
+    wire    [15:0]    cam_wr_data_w;
     wire    [16:0]    cam_wr_addr_w;
 
 
@@ -72,6 +73,7 @@ module cnn_laplacian_tft_top #(
         .count_i(16'd7),
         .clk_o(wEnClk)
     );
+
     clk_gen2    CLK_GEN_MAIN(
         .clk_i(PL_CLK_100MHZ),
         .count_i(16'h0001),
@@ -123,7 +125,7 @@ module cnn_laplacian_tft_top #(
     // 리셋 직후 바로 읽지 않고, 카메라가 첫 프레임(VSYNC)을 시작하면 그때부터 읽기를 허용합니다.
     reg start_processing;
     // 이후 FSM 으로  수정할 수 있는 신호 
-    
+
     always @(posedge PL_CLK_100MHZ or negedge iRstn) begin
         if (!iRstn) begin
             start_processing <= 1'b0;
@@ -162,8 +164,30 @@ module cnn_laplacian_tft_top #(
     // -------------------------------------------------------------------------
     // 3) InBuf
     // -------------------------------------------------------------------------
-    wire [23:0] src_pixel;
 
+    
+
+    // -------------------------------------------------------------------------
+    // [Double Buffer] Controller & Logic
+    // -------------------------------------------------------------------------
+    wire db_wr_sel; // 0 or 1
+    wire db_rd_sel; // 0 or 1
+    
+    // 컨트롤러 인스턴스화
+    buffer_controller u_buf_ctrl (
+        .clk        (PL_CLK_100MHZ),
+        .rstn       (iRstn),
+        .i_cam_vsync(CAMERA_VSYNC),        // 카메라 프레임 시작
+        .i_read_done(src_last && wEnClk_pulse), // CNN 읽기 한 프레임 완료 시점
+        .o_wr_sel   (db_wr_sel),
+        .o_rd_sel   (db_rd_sel)
+    );
+
+    // -------------------------------------------------------------------------
+    // 3) InBuf (Double Buffering 적용)
+    // -------------------------------------------------------------------------
+    
+    // Camera Logic
     camera_to_ram CAMEARA_TO_RAM(
         .clk_i(CAMERA_PCLK),
         .sw_i(1'b1),
@@ -175,24 +199,65 @@ module cnn_laplacian_tft_top #(
         .ram_wr_data_o(cam_wr_data_w)
     );
 
+    // MUX Logic for Writing (카메라 -> 버퍼)
+    wire we_0, we_1;
+    assign we_0 = (db_wr_sel == 1'b0) ? cam_wr_en_w : 1'b0;
+    assign we_1 = (db_wr_sel == 1'b1) ? cam_wr_en_w : 1'b0;
 
+    // Buffer Outputs (16-bit Raw Data)
+    wire [15:0] src_pixel_0;
+    wire [15:0] src_pixel_1;
+    wire [15:0] src_pixel_raw; // MUX된 16bit 데이터
+    
+    // MUX Logic for Reading
+    assign src_pixel_raw = (db_rd_sel == 1'b0) ? src_pixel_0 : src_pixel_1;
+
+    // --- Buffer 0 Instance (16bit) ---
     InBuf #(
-        .IMG_WIDTH  (IMG_WIDTH), .IMG_HEIGHT (IMG_HEIGHT),
-        .DATA_WIDTH (24), .ADDR_WIDTH (17)
-    ) u_inbuf (
-        // Port A: Write Side (나중에 CAM 연결)
+        .IMG_WIDTH (IMG_WIDTH), .IMG_HEIGHT (IMG_HEIGHT),
+        .DATA_WIDTH (16), .ADDR_WIDTH (17) // [수정] DATA_WIDTH 24->16
+    ) u_inbuf_0 (
         .iClk_wr   (CAMERA_PCLK),
-        .iWe_wr    (cam_wr_en_w),
+        .iWe_wr    (we_0),
         .iAddr_wr  (cam_wr_addr_w),
-        .iData_wr  (cam_wr_data_w),
+        .iData_wr  (cam_wr_data_w), // 16bit 입력
 
-        // Port B: Read Side (CNN 연결 - 기존 로직 유지)
         .iClk_rd   (PL_CLK_100MHZ),
         .iRstn     (iRstn),
-        .iEn_rd    (wEnClk),     // wEnClk (Clock Divider 출력)
+        .iEn_rd    (wEnClk),
         .iAddr_rd  (src_addr),
-        .oPixel    (src_pixel)
+        .oPixel    (src_pixel_0)    // 16bit 출력
     );
+
+    // --- Buffer 1 Instance (16bit) ---
+    InBuf #(
+        .IMG_WIDTH (IMG_WIDTH), .IMG_HEIGHT (IMG_HEIGHT),
+        .DATA_WIDTH (16), .ADDR_WIDTH (17) // [수정] DATA_WIDTH 24->16
+    ) u_inbuf_1 (
+        .iClk_wr   (CAMERA_PCLK),
+        .iWe_wr    (we_1),
+        .iAddr_wr  (cam_wr_addr_w),
+        .iData_wr  (cam_wr_data_w), // 16bit 입력
+
+        .iClk_rd   (PL_CLK_100MHZ),
+        .iRstn     (iRstn),
+        .iEn_rd    (wEnClk),
+        .iAddr_rd  (src_addr),
+        .oPixel    (src_pixel_1)    // 16bit 출력
+    );
+
+    // -------------------------------------------------------------------------
+    // [추가] 16-bit to 24-bit Expansion
+    // InBuf에서 나온 16bit(RGB565)를 window3x3에 넣기 위해 24bit(RGB888)로 확장
+    // -------------------------------------------------------------------------
+    wire [23:0] src_pixel_expanded;
+
+    assign src_pixel_expanded = {
+        src_pixel_raw[15:11], 3'b000, // Red (5bit -> 8bit)
+        src_pixel_raw[10:5],  2'b00,  // Green (6bit -> 8bit)
+        src_pixel_raw[4:0],   3'b000  // Blue (5bit -> 8bit)
+    };
+
 
     // -------------------------------------------------------------------------
     // 4) window3x3
@@ -203,7 +268,7 @@ module cnn_laplacian_tft_top #(
     window3x3 #(
         .IMG_WIDTH(IMG_WIDTH), .IMG_HEIGHT(IMG_HEIGHT), .DATA_WIDTH(24)
     ) u_window3x3 (
-        .iClk(PL_CLK_100MHZ), .iRstn(iRstn), .iEn(wEnClk), .iPixel(src_pixel),
+        .iClk(PL_CLK_100MHZ), .iRstn(iRstn), .iEn(wEnClk), .iPixel(src_pixel_expanded),
         .oWindow (wWindowData),
         .oValid(wWinValid)
     );
@@ -216,6 +281,7 @@ module cnn_laplacian_tft_top #(
 
     conv3x3_laplacian_rgb #(.ACC_WIDTH(19)) u_conv3x3 (
         .iClk(PL_CLK_100MHZ), .iRstn(iRstn), .iEn(wEnClk),
+        .iMode(/*iMode*/1'b1),
         .iValid(wWinValid), .iLast(src_last),
         .iWindow (wWindowData),
         .oPixel(conv_pixel), .oValid(conv_valid), .oLast(conv_last)

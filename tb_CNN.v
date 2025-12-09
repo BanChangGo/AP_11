@@ -1,7 +1,6 @@
 `timescale 1ns / 1ps
 
 module cnn_laplacian_tft_top_tb;
-
     // -----------------------------------------------------------
     // 1. Parameters & Signals
     // -----------------------------------------------------------
@@ -36,6 +35,7 @@ module cnn_laplacian_tft_top_tb;
     wire        TFT_DE;
     wire        TFT_HSYNC;
     wire        TFT_VSYNC;
+    reg iMode;
 
     // SCCB Pull-ups (I2C Simulation)
     assign (weak1, weak0) CAMERA_SCCB_SCL = 1'b1;
@@ -50,6 +50,7 @@ module cnn_laplacian_tft_top_tb;
     ) uut (
         .PL_CLK_100MHZ   (PL_CLK_100MHZ),
         .iRstn           (iRstn),
+        .iMode(iMode),
 
         // TFT LCD Interface
         .TFT_R_DATA      (TFT_R_DATA),
@@ -120,7 +121,7 @@ module cnn_laplacian_tft_top_tb;
     
     localparam CAM_H_ACT   = IMG_WIDTH;  // 480
     localparam CAM_V_ACT   = IMG_HEIGHT; // 272
-
+    
     initial begin
         // 초기화
         iRstn = 0;
@@ -128,6 +129,7 @@ module cnn_laplacian_tft_top_tb;
         CAMERA_HSYNC = 0;
         CAMERA_DATA  = 0;
         addr_ptr = 0;
+        iMode = 2'b00; // 초기 모드 설정
 
         // Reset Release
         #100 iRstn = 1;
@@ -185,10 +187,50 @@ module cnn_laplacian_tft_top_tb;
             repeat (10) @(posedge CAMERA_PCLK);
 
             $display("Frame Sent at time %t. Last Addr Ptr: %d", $time, addr_ptr);
+            
+            
         end
 
         #1000;
         $finish;
+    end
+    
+    // -----------------------------------------------------------
+    // [추가] Double Buffer Switching Monitor
+    // 계층 구조 접근: uut (Top) -> u_buf_ctrl (Controller) -> 내부 신호
+    // -----------------------------------------------------------
+    
+    // 1. 편의를 위해 내부 신호를 wire로 연결 (디버깅용)
+    wire mon_wr_sel = uut.u_buf_ctrl.o_wr_sel;
+    wire mon_rd_sel = uut.u_buf_ctrl.o_rd_sel;
+    wire [1:0] mon_vsync_cnt = uut.u_buf_ctrl.vsync_cnt; // VSYNC 카운터 확인용
+
+    // 2. VSYNC 발생 시 로그 출력
+    always @(posedge CAMERA_VSYNC) begin
+        $display("\n===================================================================");
+        $display("[TB-LOG] Time: %t | Camera VSYNC RISING! (Frame Start)", $time);
+        $display("[TB-LOG] Current VSYNC Count (Internal): %d", mon_vsync_cnt);
+        $display("===================================================================\n");
+    end
+
+    // 3. Write Buffer 변경 감지
+    always @(mon_wr_sel) begin
+        $display("[TB-LOG] Time: %t | >>>> WRITE Buffer Switched to: [%d]", $time, mon_wr_sel);
+        // 검증 로직: Write랑 Read랑 겹치면 경고 (단, 초기 Reset 구간 제외)
+        if ($time > 500 && mon_wr_sel == mon_rd_sel) begin
+            $display("[TB-WARNING] Wait! Write and Read are looking at same buffer [%d]! (OK only if starting)", mon_wr_sel);
+        end
+    end
+
+    // 4. Read Buffer 변경 감지
+    always @(mon_rd_sel) begin
+        $display("[TB-LOG] Time: %t | <<<< READ  Buffer Switched to: [%d]", $time, mon_rd_sel);
+    end
+
+    // 5. CNN/LCD 읽기 완료 감지 (Top 내부 신호 접근)
+    // uut.src_last 가 1이 되는 순간 감지
+    always @(posedge uut.src_last) begin
+         $display("[TB-LOG] Time: %t | Processing Read Done (One Frame Finished)", $time);
     end
 
 endmodule

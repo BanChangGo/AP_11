@@ -3,69 +3,69 @@
 module buffer_controller (
     input  wire clk,
     input  wire rstn,
-    input  wire i_cam_vsync,    // 카메라 VSYNC (Frame Start)
-    input  wire i_read_done,    // CNN 읽기 완료
+    input  wire i_cam_vsync,   
+    input  wire i_read_done,    // 이제 src_last가 직접 들어옴 (Long Pulse)
     
-    output reg  o_wr_sel,       // 0 or 1
-    output reg  o_rd_sel        // 0 or 1
+    output reg  o_wr_sel,       
+    output reg  o_rd_sel        
 );
 
-    // 1. VSYNC Edge Detect
+    // 1. VSYNC Rising Edge Detect
     reg prev_vsync;
-    wire vsync_rising;
-    
+    wire vsync_start;
+
     always @(posedge clk or negedge rstn) begin
         if (!rstn) prev_vsync <= 1'b0;
         else       prev_vsync <= i_cam_vsync;
     end
-    
-    assign vsync_rising = (prev_vsync == 1'b0 && i_cam_vsync == 1'b1);
+    assign vsync_start = (prev_vsync == 1'b0 && i_cam_vsync == 1'b1);
 
-    // 2. VSYNC Counter (첫 프레임 구분용)
-    // 0: 리셋 직후
-    // 1: 첫 번째 VSYNC 도착 (Frame 0 작성 시작) -> 이때는 스위칭하면 안 됨!
-    // 2 이상: 두 번째 VSYNC 이후 (Frame 1 작성 시작) -> 이때부터 스위칭
-    reg [1:0] vsync_cnt;
+
+    // -----------------------------------------------------------
+    // [추가] Read Done Rising Edge Detect (핵심!)
+    // src_last가 16사이클 동안 켜져 있어도, 딱 한 번만 트리거하기 위함
+    // -----------------------------------------------------------
+    reg prev_read_done;
+    wire read_done_edge;
 
     always @(posedge clk or negedge rstn) begin
+        if (!rstn) prev_read_done <= 1'b0;
+        else       prev_read_done <= i_read_done;
+    end
+
+    // 0이었다가 1이 되는 순간만 포착
+    assign read_done_edge = (prev_read_done == 1'b0 && i_read_done == 1'b1);
+
+
+    // -----------------------------------------------------------
+    // 2. Read Select Control (Master)
+    // -----------------------------------------------------------
+    always @(posedge clk or negedge rstn) begin
         if (!rstn) begin
-            vsync_cnt <= 2'd0;
-        end else if (vsync_rising) begin
-            if (vsync_cnt < 2'd2)
-                vsync_cnt <= vsync_cnt + 1'b1;
+            o_rd_sel <= 1'b0; 
+        end else if (read_done_edge) begin // [수정] i_read_done 대신 edge 사용
+            o_rd_sel <= ~o_rd_sel; 
         end
     end
 
-    // ---------------------------------------------------------------------
-    // 3. Write Select Control
-    // ---------------------------------------------------------------------
+
+    // -----------------------------------------------------------
+    // 3. Write Select Control (Slave)
+    // -----------------------------------------------------------
+    reg is_first_frame; 
+
     always @(posedge clk or negedge rstn) begin
         if (!rstn) begin
-            o_wr_sel <= 1'b0; 
-        end else if (vsync_rising) begin
-            // [수정된 로직]
-            if (vsync_cnt == 2'd0) begin
-                // 첫 번째 VSYNC (Frame 0 시작): 
-                // 아직 0번 버퍼에 써야 함. 바꾸지 말고 0 유지.
-                o_wr_sel <= 1'b0; 
+            o_wr_sel <= 1'b0;
+            is_first_frame <= 1'b1;
+        end else if (vsync_start) begin
+            if (is_first_frame) begin
+                o_wr_sel <= 1'b0;
+                is_first_frame <= 1'b0; 
             end else begin
-                // 두 번째 VSYNC (Frame 1 시작) 부터:
-                // 이제 진짜로 Reader를 피해서 도망가야 함.
-                // 현재 Reader가 읽고 있는 버퍼(rd_sel)의 반대편을 선택
+                // Read가 있는 곳의 반대를 선택
                 o_wr_sel <= ~o_rd_sel; 
             end
-        end
-    end
-
-    // ---------------------------------------------------------------------
-    // 4. Read Select Control
-    // ---------------------------------------------------------------------
-    always @(posedge clk or negedge rstn) begin
-        if (!rstn) begin
-            o_rd_sel <= 1'b0; // 초기값 0 (Write와 같이 시작)
-        end else if (i_read_done) begin
-            // 읽기가 끝나면, Writer가 현재 쓰고 있는(혹은 막 다 쓴) 쪽을 따라감
-            o_rd_sel <= o_wr_sel; 
         end
     end
 

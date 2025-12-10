@@ -131,7 +131,7 @@ module cnn_laplacian_tft_top #(
             start_processing <= 1'b0;
         end else begin
             // 카메라 VSYNC(프레임 시작 신호)가 한번이라도 들어오면 시작 플래그를 1로 고정
-            if (cam_wr_addr_w) 
+            if (cam_wr_addr_w > 0) 
                 start_processing <= 1'b1;
         end
     end
@@ -178,7 +178,7 @@ module cnn_laplacian_tft_top #(
         .clk        (PL_CLK_100MHZ),
         .rstn       (iRstn),
         .i_cam_vsync(CAMERA_VSYNC),        // 카메라 프레임 시작
-        .i_read_done(src_last && wEnClk_pulse), // CNN 읽기 한 프레임 완료 시점
+        .i_read_done(src_last), // CNN 읽기 한 프레임 완료 시점
         .o_wr_sel   (db_wr_sel),
         .o_rd_sel   (db_rd_sel)
     );
@@ -281,7 +281,7 @@ module cnn_laplacian_tft_top #(
 
     conv3x3_laplacian_rgb #(.ACC_WIDTH(19)) u_conv3x3 (
         .iClk(PL_CLK_100MHZ), .iRstn(iRstn), .iEn(wEnClk),
-        .iMode(/*iMode*/1'b1),
+        .iMode(/*iMode*/1'b0),
         .iValid(wWinValid), .iLast(src_last),
         .iWindow (wWindowData),
         .oPixel(conv_pixel), .oValid(conv_valid), .oLast(conv_last)
@@ -344,20 +344,38 @@ module cnn_laplacian_tft_top #(
     end
     */
 
-    ram_to_lcd u_ram_to_lcd (
+    ram_to_lcd #(
+        .H_SYNC_W_D(40),
+        .H_BACK_P_D(2),
+        .H_ACTIVE_D(480),
+        .V_SYNC_W_D(10),
+        .V_BACK_P_D(2),
+        .V_ACTIVE_D(272),
+        .H_FRONT_P_D(2),
+        .V_FRONT_P_D(2)
+    ) u_ram_to_lcd (
         .clk_i(wEnClk_pulse),
-        //.iEnable(1'b1),
+        .iEnable(1'b1),
 
         .ram_rd_addr_o(ram_rd_addr),
         .ram_rd_data_i(ram_rd_data),
 
-        .LCD_hsync_o(TFT_HSYNC),
-        .LCD_vsync_o(TFT_VSYNC),
-        .LCD_R_o(TFT_R_DATA),
-        .LCD_G_o(TFT_G_DATA),
-        .LCD_B_o(TFT_B_DATA)
+        .LCD_hsync_o(LCD_hsync_o),
+        .LCD_vsync_o(LCD_vsync_o),
+        .LCD_R_o(LCD_R_o),
+        .LCD_G_o(LCD_G_o),
+        .LCD_B_o(LCD_B_o),
+        
+        .h_sync_w(h_sync_w),
+        .h_back_p(h_back_p),
+        .h_active(h_active),
+        .h_front_p(h_front_p),
 
-         
+        .v_sync_w(v_sync_w),
+        .v_back_p(v_back_p),
+        .v_active(v_active),
+        .v_front_p(v_front_p)
+        
     );
 
     // �� �ٽ�: LCD ���� �ɿ��� �簢�� ���� Ŭ���� ���� ����

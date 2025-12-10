@@ -34,7 +34,7 @@ module cnn_laplacian_tft_top #(
 );
     // VIO ?��?�� ?���??? ?���????��?�� ?��?��
     
-   
+    wire [1:0] mode_w;
     wire [15:0] h_sync_w;
     wire [15:0] h_back_p;
     wire [15:0] h_front_p;
@@ -49,7 +49,7 @@ module cnn_laplacian_tft_top #(
     wire    [15:0]    cam_wr_data_w;
     wire    [16:0]    cam_wr_addr_w;
 
-
+    /*
     vio_0 u_vio(
         .clk(PL_CLK_100MHZ),
         .probe_out0(h_sync_w),
@@ -62,6 +62,22 @@ module cnn_laplacian_tft_top #(
         .probe_out7(h_front_p)
         
     );
+    */ 
+
+    vio_0 u_vio(
+        .clk(PL_CLK_100MHZ),
+        .probe_out0(mode_w)
+    );
+    
+    // [Error Fix 1] TOTAL_PIX 정의 추가
+    localparam TOTAL_PIX = IMG_WIDTH * IMG_HEIGHT; 
+
+    // [Error Fix 2] always문에서 값을 넣으므로 reg로 선언해야 함 (wire 금지)
+    reg [16:0] src_addr;
+    reg        src_last;
+
+    wire [1:0] iMode = (mode_w  == 0) ? 0 : mode_w;
+
     // -------------------------------------------------------------------------
     // 1) Clock Generation
     // -------------------------------------------------------------------------
@@ -120,6 +136,30 @@ module cnn_laplacian_tft_top #(
     end
 
     // -------------------------------------------------------------------------
+    // [추가] FSM Controller Instance
+    // -------------------------------------------------------------------------
+    wire w_core_start_trigger; 
+    wire w_is_active;          // FSM이 알려주는 Active 상태
+    wire [1:0] w_safe_imode;   // [중요] FSM이 타이밍 맞춰서 주는 모드값
+    
+    CNN_Flow_Controller u_flow_ctrl (
+        .clk         (PL_CLK_100MHZ),
+        .rst_n       (iRstn),
+        .i_imode     (iMode),      // VIO/AXI 값 (0:Bypass, 1:Sharp, 2:Edge, 3:Stop)
+        .i_frame_done(src_last),   
+        
+        .o_core_start(w_core_start_trigger),
+        .o_is_active (w_is_active), // Top의 is_processing_active 레지스터 대신 이걸 써도 됨
+        .o_safe_mode (w_safe_imode) // Conv 모듈에 넣을 값
+    );
+
+    // -------------------------------------------------------------------------
+    // [추가] Processing Status Logic
+    // -------------------------------------------------------------------------
+    wire is_processing_active = w_is_active;
+
+
+    // -------------------------------------------------------------------------
     // [수정] Processing Start Control (VSYNC 감지)
     // -------------------------------------------------------------------------
     // 리셋 직후 바로 읽지 않고, 카메라가 첫 프레임(VSYNC)을 시작하면 그때부터 읽기를 허용합니다.
@@ -135,38 +175,35 @@ module cnn_laplacian_tft_top #(
                 start_processing <= 1'b1;
         end
     end
-
     // -------------------------------------------------------------------------
-    // 2) pixel_addr_ctrl (수정됨)
+    // 2) pixel_addr_ctrl (수정 및 선언부 확인 필수!)
     // -------------------------------------------------------------------------
-    localparam TOTAL_PIX = IMG_WIDTH * IMG_HEIGHT;
-
-    reg [16:0] src_addr;
-    reg        src_last;
-
+    
     always @(posedge PL_CLK_100MHZ or negedge iRstn) begin
         if (!iRstn) begin
             src_addr <= 17'd0;
             src_last <= 1'b0;
-        end else if (wEnClk_pulse && start_processing) begin // [수정] start_processing 조건 추가
+        end 
+        // 카운터 동작 조건: 클럭펄스 + 카메라 준비됨 + FSM Active
+        else if (wEnClk_pulse && start_processing && is_processing_active) begin 
             if (src_addr == TOTAL_PIX - 1) begin
                 src_addr <= 17'd0;
-                src_last <= 1'b1;
+                src_last <= 1'b1; 
             end else begin
                 src_addr <= src_addr + 1'b1;
                 src_last <= 1'b0;
             end
         end else begin
+            // Active가 아니면 카운터 및 last 신호 초기화
             src_last <= 1'b0;
-            // start_processing이 0일 때는 src_addr이 0에서 대기
+            if (!is_processing_active) src_addr <= 17'd0; 
         end
     end
+
+
     // -------------------------------------------------------------------------
     // 3) InBuf
-    // -------------------------------------------------------------------------
-
-    
-
+    // ------------------------------------------------------------------------- 
     // -------------------------------------------------------------------------
     // [Double Buffer] Controller & Logic
     // -------------------------------------------------------------------------
@@ -281,7 +318,7 @@ module cnn_laplacian_tft_top #(
 
     conv3x3_laplacian_rgb #(.ACC_WIDTH(19)) u_conv3x3 (
         .iClk(PL_CLK_100MHZ), .iRstn(iRstn), .iEn(wEnClk),
-        .iMode(/*iMode*/1'b0),
+        .iMode(iMode),
         .iValid(wWinValid), .iLast(src_last),
         .iWindow (wWindowData),
         .oPixel(conv_pixel), .oValid(conv_valid), .oLast(conv_last)
@@ -344,38 +381,20 @@ module cnn_laplacian_tft_top #(
     end
     */
 
-    ram_to_lcd #(
-        .H_SYNC_W_D(40),
-        .H_BACK_P_D(2),
-        .H_ACTIVE_D(480),
-        .V_SYNC_W_D(10),
-        .V_BACK_P_D(2),
-        .V_ACTIVE_D(272),
-        .H_FRONT_P_D(2),
-        .V_FRONT_P_D(2)
-    ) u_ram_to_lcd (
+    ram_to_lcd u_ram_to_lcd (
         .clk_i(wEnClk_pulse),
-        .iEnable(1'b1),
+        //.iEnable(1'b1),
 
         .ram_rd_addr_o(ram_rd_addr),
         .ram_rd_data_i(ram_rd_data),
 
-        .LCD_hsync_o(LCD_hsync_o),
-        .LCD_vsync_o(LCD_vsync_o),
-        .LCD_R_o(LCD_R_o),
-        .LCD_G_o(LCD_G_o),
-        .LCD_B_o(LCD_B_o),
+        .LCD_hsync_o(TFT_HSYNC),
+        .LCD_vsync_o(TFT_VSYNC),
+        .LCD_R_o(TFT_R_DATA),
+        .LCD_G_o(TFT_G_DATA),
+        .LCD_B_o(TFT_B_DATA)
         
-        .h_sync_w(h_sync_w),
-        .h_back_p(h_back_p),
-        .h_active(h_active),
-        .h_front_p(h_front_p),
-
-        .v_sync_w(v_sync_w),
-        .v_back_p(v_back_p),
-        .v_active(v_active),
-        .v_front_p(v_front_p)
-        
+         
     );
 
     // �� �ٽ�: LCD ���� �ɿ��� �簢�� ���� Ŭ���� ���� ����

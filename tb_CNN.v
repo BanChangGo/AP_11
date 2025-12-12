@@ -8,40 +8,52 @@ module cnn_laplacian_tft_top_tb;
     parameter IMG_HEIGHT = 272;
 
     // FPGA System Inputs
-    reg          PL_CLK_100MHZ;
-    reg          iRstn;
+    reg           PL_CLK_100MHZ;
+    reg           iRstn;
 
-    // Camera Interface (Input to FPGA)
-    reg          CAMERA_PCLK;
-    reg          CAMERA_HSYNC;
-    reg          CAMERA_VSYNC;
-    reg [7:0]    CAMERA_DATA;
+    // Camera Interface
+    reg           CAMERA_PCLK;
+    reg           CAMERA_HSYNC;
+    reg           CAMERA_VSYNC;
+    reg [7:0]     CAMERA_DATA;
     
     // Inout Ports (I2C)
-    wire         CAMERA_SCCB_SCL;
-    wire         CAMERA_SCCB_SDA;
+    wire          CAMERA_SCCB_SCL;
+    wire          CAMERA_SCCB_SDA;
 
-    // Camera Control Outputs (From FPGA)
-    wire         CAMERA_RESETn;
-    wire         CAMERA_PWDN;
-    wire         CAMERA_MCLK;
-
-    // TFT LCD Outputs (From FPGA)
-    wire [4:0]   TFT_R_DATA;
-    wire [5:0]   TFT_G_DATA;
-    wire [4:0]   TFT_B_DATA;
-    wire         TFT_DCLK;
-    wire         TFT_BACKLIGHT;
-    wire         TFT_DE;
-    wire         TFT_HSYNC;
-    wire         TFT_VSYNC;
-    reg [1:0] iMode;
+    // Outputs
+    wire          CAMERA_RESETn;
+    wire          CAMERA_PWDN;
+    wire          CAMERA_MCLK;
+    wire [4:0]    TFT_R_DATA;
+    wire [5:0]    TFT_G_DATA;
+    wire [4:0]    TFT_B_DATA;
+    wire          TFT_DCLK;
+    wire          TFT_BACKLIGHT;
+    wire          TFT_DE;
+    wire          TFT_HSYNC;
+    wire          TFT_VSYNC;
     
-    // SCCB Pull-ups (I2C Simulation)
+    // Control Signals
+    reg [1:0]     iMode; // 0:Bypass, 1:Sharp, 2:Edge, 3:AXI User
+    
+    // AXI Registers (Simulated as Regs for now)
+    reg signed [31:0] i_Kernel_value_0;
+    reg signed [31:0] i_Kernel_value_1;
+    reg signed [31:0] i_Kernel_value_2;
+    reg signed [31:0] i_Kernel_value_3;
+    reg signed [31:0] i_Kernel_value_4;
+    reg signed [31:0] i_Kernel_value_5;
+    reg signed [31:0] i_Kernel_value_6;
+    reg signed [31:0] i_Kernel_value_7;
+    reg signed [31:0] i_Kernel_value_8;
+    
+    // I2C Pull-ups
     assign (weak1, weak0) CAMERA_SCCB_SCL = 1'b1;
     assign (weak1, weak0) CAMERA_SCCB_SDA = 1'b1;
+
     // -----------------------------------------------------------
-    // 2. DUT Instance (Device Under Test)
+    // 2. DUT Instance
     // -----------------------------------------------------------
     cnn_laplacian_tft_top #(
         .IMG_WIDTH (IMG_WIDTH),
@@ -49,8 +61,8 @@ module cnn_laplacian_tft_top_tb;
     ) uut (
         .PL_CLK_100MHZ   (PL_CLK_100MHZ),
         .iRstn           (iRstn),
+        .iMode           (iMode),
         
-        // TFT LCD Interface
         .TFT_R_DATA      (TFT_R_DATA),
         .TFT_G_DATA      (TFT_G_DATA),
         .TFT_B_DATA      (TFT_B_DATA),
@@ -59,8 +71,7 @@ module cnn_laplacian_tft_top_tb;
         .TFT_DE          (TFT_DE),
         .TFT_HSYNC       (TFT_HSYNC),
         .TFT_VSYNC       (TFT_VSYNC),
-        .iMode (iMode),
-        // Camera Interface
+
         .CAMERA_SCCB_SCL (CAMERA_SCCB_SCL),
         .CAMERA_SCCB_SDA (CAMERA_SCCB_SDA),
         .CAMERA_PCLK     (CAMERA_PCLK),
@@ -69,168 +80,156 @@ module cnn_laplacian_tft_top_tb;
         .CAMERA_HSYNC    (CAMERA_HSYNC),
         .CAMERA_VSYNC    (CAMERA_VSYNC),
         .CAMERA_PWDN     (CAMERA_PWDN),
-        .CAMERA_MCLK     (CAMERA_MCLK)
+        .CAMERA_MCLK     (CAMERA_MCLK),
+        
+        // AXI Inputs
+        .i_Kernel_value_0(i_Kernel_value_0), .i_Kernel_value_1(i_Kernel_value_1), .i_Kernel_value_2(i_Kernel_value_2),
+        .i_Kernel_value_3(i_Kernel_value_3), .i_Kernel_value_4(i_Kernel_value_4), .i_Kernel_value_5(i_Kernel_value_5),
+        .i_Kernel_value_6(i_Kernel_value_6), .i_Kernel_value_7(i_Kernel_value_7), .i_Kernel_value_8(i_Kernel_value_8)
     );
 
     // -----------------------------------------------------------
     // 3. Clock Generation
     // -----------------------------------------------------------
-    // FPGA System Clock: 100MHz (Period 10ns)
     initial PL_CLK_100MHZ = 0;
-    always #5 PL_CLK_100MHZ = ~PL_CLK_100MHZ;
+    always #5 PL_CLK_100MHZ = ~PL_CLK_100MHZ; // 100MHz
 
-    // Camera Pixel Clock: ~25MHz (Period 40ns)
     initial CAMERA_PCLK = 0;
-    always #20 CAMERA_PCLK = ~CAMERA_PCLK; 
+    always #20 CAMERA_PCLK = ~CAMERA_PCLK;    // 25MHz
 
     // -----------------------------------------------------------
-    // 4. VIO Signal Force (Simulation Only)
+    // 4. Tasks (Helper Functions)
     // -----------------------------------------------------------
-    initial begin
-        // VIO가 시뮬레이션에서 'Z'로 뜨는 것을 방지하기 위해 강제 할당
-        force uut.h_sync_w = 16'd0;
-        force uut.h_back_p = 16'd0;
-        force uut.h_active = 16'd0;
-        force uut.h_front_p= 16'd0;
-        force uut.v_sync_w = 16'd0;
-        force uut.v_back_p = 16'd0;
-        force uut.v_active = 16'd0;
-        force uut.v_front_p= 16'd0;
+    
+    // [Task] AXI 레지스터 쓰기 모사 (순차적 업데이트)
+    // CPU가 AXI Bus를 통해 하나씩 값을 쓰는 것을 흉내냅니다.
+    task update_axi_kernel_emboss;
+    begin
+        $display("[AXI-MOCK] Start Writing Kernel Registers (Emboss Filter)...");
+        // Emboss Filter: [-2 -1 0], [-1 1 1], [0 1 2]
+        @(posedge PL_CLK_100MHZ); i_Kernel_value_0 <= -2;
+        @(posedge PL_CLK_100MHZ); i_Kernel_value_1 <= -1;
+        @(posedge PL_CLK_100MHZ); i_Kernel_value_2 <=  0;
+        @(posedge PL_CLK_100MHZ); i_Kernel_value_3 <= -1;
+        @(posedge PL_CLK_100MHZ); i_Kernel_value_4 <=  1;
+        @(posedge PL_CLK_100MHZ); i_Kernel_value_5 <=  1;
+        @(posedge PL_CLK_100MHZ); i_Kernel_value_6 <=  0;
+        @(posedge PL_CLK_100MHZ); i_Kernel_value_7 <=  1;
+        @(posedge PL_CLK_100MHZ); i_Kernel_value_8 <=  2;
+        $display("[AXI-MOCK] Kernel Registers Updated.");
     end
+    endtask
 
     // -----------------------------------------------------------
-    // 5. Test Stimulus (Internal Pattern Generator)
+    // 5. Test Stimulus
     // -----------------------------------------------------------
     integer h, v;
-    reg [15:0] pixel_pattern; // 임의 생성된 16bit(RGB565) 픽셀 값
+    integer frame_idx;
+    reg [15:0] pixel_pattern; 
     
-    localparam CAM_H_ACT   = IMG_WIDTH;  // 480
-    localparam CAM_V_ACT   = IMG_HEIGHT; // 272
+    localparam CAM_H_ACT   = IMG_WIDTH;  
+    localparam CAM_V_ACT   = IMG_HEIGHT; 
     
     initial begin
-        // 초기화
+        // Init
         iRstn = 0;
-        CAMERA_VSYNC = 0;
-        CAMERA_HSYNC = 0;
-        CAMERA_DATA  = 0;
-        iMode = 0;
-
+        CAMERA_VSYNC = 0; CAMERA_HSYNC = 0; CAMERA_DATA  = 0;
+        iMode = 0; // Start with Bypass
+        
+        // AXI Default (Identity)
+        i_Kernel_value_0=0; i_Kernel_value_1=0; i_Kernel_value_2=0;
+        i_Kernel_value_3=0; i_Kernel_value_4=1; i_Kernel_value_5=0;
+        i_Kernel_value_6=0; i_Kernel_value_7=0; i_Kernel_value_8=0;
+        
         // Reset Release
         #100 iRstn = 1;
         #200;
 
+        $display("==================================================");
+        $display(" Simulation Start ");
+        $display("==================================================");
+
         // -------------------------------------------------------
-        // Camera Frame Loop
+        // Camera Frame Loop (7 Frames)
         // -------------------------------------------------------
-        repeat (7) begin // 3 프레임 전송 시뮬레이션
+        for (frame_idx = 1; frame_idx <= 7; frame_idx = frame_idx + 1) begin
             
-            // 1. VSYNC Start (Pulse)
+            // [Test Scenario]
+            if (frame_idx == 1) begin
+                $display("\n[TEST] Frame 1: Mode 0 (Bypass)");
+                iMode = 2'b00;
+            end
+            else if (frame_idx == 3) begin
+                $display("\n[TEST] Frame 3: Mode 2 (Edge Detection)");
+                iMode = 2'b10;
+            end
+            else if (frame_idx == 5) begin
+                $display("\n[TEST] Frame 5: Switch to Mode 3 (AXI User Mode)");
+                // 1. 먼저 AXI 레지스터 값을 업데이트 (Emboss)
+                update_axi_kernel_emboss();
+                // 2. 모드 변경 (이 시점부터 Flow Controller가 다음 Blank 구간에 값을 캡처함)
+                #100; 
+                iMode = 2'b11; 
+            end
+
+            // --- VSYNC Start ---
             CAMERA_VSYNC = 1;
             repeat (10) @(posedge CAMERA_PCLK); 
             CAMERA_VSYNC = 0;
 
-            // 2. V Back Porch
+            // V Back Porch
             repeat (20) @(posedge CAMERA_PCLK);
             
-            // 3. Active Lines Loop
+            // --- Active Lines ---
             for (v = 0; v < CAM_V_ACT; v = v + 1) begin
-                
-                // HSYNC Start (Active High during data valid)
                 CAMERA_HSYNC = 1; 
 
-                // ** Active Pixel Data Generation **
-                // 1 Pixel = 2 Bytes (RGB565)
-                // ** Active Pixel Data Generation (Color Bar) **
+                // Color Bar Pattern
                 for (h = 0; h < CAM_H_ACT; h = h + 1) begin
-                    
-                    // [쉬운 패턴] 행(v)의 위치에 따라 색깔을 다르게 쏘기
-                    if (v < 50) begin
-                        // 0 ~ 49라인: RED (11111 000000 00000)
-                        pixel_pattern = 16'hF800; 
-                    end else if (v < 100) begin
-                        // 50 ~ 99라인: GREEN (00000 111111 00000)
-                        pixel_pattern = 16'h07E0;
-                    end else if (v < 150) begin
-                        // 100 ~ 149라인: BLUE (00000 000000 11111)
-                        pixel_pattern = 16'h001F;
-                    end else if (v < 200) begin
-                        // 150 ~ 199라인: WHITE (11111 111111 11111)
-                        pixel_pattern = 16'hFFFF;
-                    end else begin
-                        // 나머지: BLACK (00000 000000 00000)
-                        pixel_pattern = 16'h0000;
-                    end
+                    if (v < 50)       pixel_pattern = 16'hF800; // Red
+                    else if (v < 100) pixel_pattern = 16'h07E0; // Green
+                    else if (v < 150) pixel_pattern = 16'h001F; // Blue
+                    else if (v < 200) pixel_pattern = 16'hFFFF; // White
+                    else              pixel_pattern = 16'h0000; // Black
 
-                    // ---------------------------------------------
-                    // 아래는 기존 전송 로직과 동일
-                    // ---------------------------------------------
-
-                    // [Cycle 1] High Byte Sending
                     CAMERA_DATA = pixel_pattern[15:8]; 
                     @(posedge CAMERA_PCLK);
                     
-                    // [Cycle 2] Low Byte Sending
                     CAMERA_DATA = pixel_pattern[7:0];
                     @(posedge CAMERA_PCLK);
-                    
                 end
 
-                // 라인 종료: HSYNC Low
-                CAMERA_HSYNC = 0;
-                
-                // Data Invalid zone
+                CAMERA_HSYNC = 0; 
                 CAMERA_DATA = 8'h00;
-
-                // H Front/Back Porch (Simulate horizontal blanking)
-                repeat (20) @(posedge CAMERA_PCLK);
+                repeat (20) @(posedge CAMERA_PCLK); // H Blank
             end
 
-            // 4. V Front Porch
+            // V Front Porch
             repeat (100) @(posedge CAMERA_PCLK);
 
-            $display("Frame Sent at time %t.", $time);
-            
+            $display("Frame %0d Sent at time %t.", frame_idx, $time);
         end
 
-        #2000;
+        #5000;
         $display("Simulation Finished Successfully.");
         $finish;
     end
     
     // -----------------------------------------------------------
-    // [Monitoring] Double Buffer & VSYNC Debug
+    // [Monitoring]
     // -----------------------------------------------------------
-    
-    // 내부 신호 모니터링 (계층 구조가 맞는지 확인 필요)
+    // Monitor Internal Signals
     wire mon_wr_sel = uut.u_buf_ctrl.o_wr_sel;
     wire mon_rd_sel = uut.u_buf_ctrl.o_rd_sel;
-    //wire [1:0] mon_vsync_cnt = uut.u_buf_ctrl.vsync_cnt;
+    // Monitor the actual kernel being used in Conv module
+    wire signed [7:0] mon_k4 = uut.u_flow_ctrl.r_k4;
 
-    // VSYNC 로그
+    always @(mon_k4) begin
+        $display("[MONITOR] Time: %t | Active Center Kernel (k4) Changed to: %d", $time, mon_k4);
+    end
+
     always @(posedge CAMERA_VSYNC) begin
-        $display("\n===================================================================");
-        $display("[TB-LOG] Time: %t | Camera VSYNC RISING! (New Frame Start)", $time);
-        //$display("[TB-LOG] Current Internal VSYNC Count: %d", mon_vsync_cnt);
-        $display("===================================================================\n");
-    end
-
-    // Write Buffer 변경 감지
-    always @(mon_wr_sel) begin
-        $display("[TB-LOG] Time: %t | >>>> WRITE Buffer Switched to: [%d]", $time, mon_wr_sel);
-        // Reset 구간 이후, Read/Write 포인터 충돌 경고
-        if ($time > 1000 && mon_wr_sel == mon_rd_sel) begin
-            $display("[TB-WARNING] Conflict? Write and Read are using same buffer [%d]!", mon_wr_sel);
-        end
-    end
-
-    // Read Buffer 변경 감지
-    always @(mon_rd_sel) begin
-        $display("[TB-LOG] Time: %t | <<<< READ  Buffer Switched to: [%d]", $time, mon_rd_sel);
-    end
-
-    // CNN/LCD 처리 완료 감지 (uut 내부 신호)
-    always @(posedge uut.src_last) begin
-         $display("[TB-LOG] Time: %t | Processing (Read) Done for current frame.", $time);
+        $display("[MONITOR] Time: %t | VSYNC Start", $time);
     end
 
 endmodule

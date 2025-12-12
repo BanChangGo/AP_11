@@ -6,86 +6,60 @@ module cnn_laplacian_tft_top #(
 )(
     input  wire        PL_CLK_100MHZ,
     input  wire        iRstn,
-    input  wire [1:0]  iMode,
+    input  wire [1:0]  iMode,  // 0:Bypass, 1:Sharp, 2:Edge, 3:AXI User Kernel
 
+    // TFT LCD Interface
     output wire [4:0]  TFT_R_DATA,
     output wire [5:0]  TFT_G_DATA,
     output wire [4:0]  TFT_B_DATA,
-    output wire        TFT_DCLK,     // LCD                 Ŭ   (Square Wave)
+    output wire        TFT_DCLK,     
     output wire        TFT_BACKLIGHT,
     output wire        TFT_DE,
-
     output wire        TFT_HSYNC,
     output wire        TFT_VSYNC,
 
+    // Camera Interface
 
-    inout  wire            CAMERA_SCCB_SCL,
-    inout  wire            CAMERA_SCCB_SDA,
     input  wire            CAMERA_PCLK,
     input  wire  [ 7:0]    CAMERA_DATA,
-
     output wire            CAMERA_RESETn,
-
     input  wire            CAMERA_HSYNC,
     input  wire            CAMERA_VSYNC,
-
     output wire            CAMERA_PWDN,
-    output wire            CAMERA_MCLK
+    output wire            CAMERA_MCLK,
+
+    // [추가] AXI Register Inputs (From S_AXI_LITE_REG_CNN)
+    input wire signed [31:0]  i_Kernel_value_0,
+    input wire signed [31:0]  i_Kernel_value_1,
+    input wire signed [31:0]  i_Kernel_value_2,
+    input wire signed [31:0]  i_Kernel_value_3,
+    input wire signed [31:0]  i_Kernel_value_4,
+    input wire signed [31:0]  i_Kernel_value_5,
+    input wire signed [31:0]  i_Kernel_value_6,
+    input wire signed [31:0]  i_Kernel_value_7,
+    input wire signed [31:0]  i_Kernel_value_8
 );
-    // VIO ?  ?   ?   ??? ?   ????  ?   ?  ?  
-    
-    wire [1:0] mode_w;
-    wire [15:0] h_sync_w;
-    wire [15:0] h_back_p;
-    wire [15:0] h_front_p;
-    wire [15:0] h_active;
-    wire [15:0] v_sync_w;
-    wire [15:0] v_back_p;
-    wire [15:0] v_active;
-    wire [15:0] v_front_p;
-
     wire    cam_wr_en_w;
-
     wire    [15:0]    cam_wr_data_w;
     wire    [16:0]    cam_wr_addr_w;
-
-    /*
-    vio_0 u_vio(
-        .clk(PL_CLK_100MHZ),
-        .probe_out0(h_sync_w),
-        .probe_out1(h_back_p),
-        .probe_out2(h_active),
-        .probe_out3(v_sync_w),
-        .probe_out4(v_back_p),
-        .probe_out5(v_active),
-        .probe_out6(v_front_p),
-        .probe_out7(h_front_p)
-        
-    );
-    */ 
-
-    vio_0 u_vio(
-        .clk(PL_CLK_100MHZ),
-        .probe_out0(mode_w)
-    );
     
-    // [Error Fix 1] TOTAL_PIX 정의 추가
+    // [중요] 외부 입력 iMode가 있으면 그것을 우선, 없으면 VIO 사용 (현재는 iMode 포트 사용)
+    // 만약 VIO로 제어하고 싶으면 아래 wire [1:0] iMode = mode_w; 로 변경 필요
+    // 현재 코드에서는 포트로 받은 iMode를 그대로 사용합니다.
+    
     localparam TOTAL_PIX = IMG_WIDTH * IMG_HEIGHT; 
 
-    // [Error Fix 2] always문에서 값을 넣으므로 reg로 선언해야 함 (wire 금지)
     reg [16:0] src_addr;
     reg        src_last;
-
-    //wire [1:0] iMode = (mode_w  == 0) ? 0 : mode_w;
 
     // -------------------------------------------------------------------------
     // 1) Clock Generation
     // -------------------------------------------------------------------------
-    wire wEnClk;       //        (Pulse) -  ý      ü     ȭ Ŭ  
+    wire wEnClk;       // 6.25MHz Pixel Clock (Square Wave for LCD)
 
     clk_gen2 CLK_GEN_TFTLCD(
         .clk_i(PL_CLK_100MHZ),
-        .iRstn(iRstn),      // <-     
+        .iRstn(iRstn),      
         .count_i(16'd7),
         .clk_o(wEnClk)
     );
@@ -95,29 +69,14 @@ module cnn_laplacian_tft_top #(
         .count_i(16'h0001),
         .iRstn(iRstn),
         .clk_o(CAMERA_MCLK)
-    );//25MHz
+    ); // 25MHz for Camera XCLK
 
-    //// CAM PL
-    wire                        clk_campower        ;
-    
-    clk_gen2    I2C_RESET(
-        .clk_i                      (CAMERA_MCLK       ),
-        .count_i                    (16'h0064       ),
-        .iRstn(iRstn),
-        .clk_o                      (clk_campower   )
-    );
-    
-    cam_i2c CAM_SETUP_SCCB(
-        .clk_i                      (clk_campower   ),
-        .sw                         (1'b1           ),
-        .cam_rst_no                 (CAMERA_RESETn     ),
-        .cam_pwdn                   (CAMERA_PWDN       ),
-        .cam_scl                    (CAMERA_SCCB_SCL   ),
-        .cam_sda                    (CAMERA_SCCB_SDA   )      
-    );
+   
 
-    // 100MHz -> 6.25MHz enable pulse ?  ?  
-    reg [3:0] cnt_6p25;   // 16분주?   4bit 카운?  
+    // -------------------------------------------------------------------------
+    // Pulse Generation (100MHz domain enable signal)
+    // -------------------------------------------------------------------------
+    reg [3:0] cnt_6p25;   
     reg       wEnClk_pulse;
 
     always @(posedge PL_CLK_100MHZ or negedge iRstn) begin
@@ -127,7 +86,7 @@ module cnn_laplacian_tft_top #(
         end else begin
             if (cnt_6p25 == 4'd15) begin
                 cnt_6p25     <= 4'd0;
-                wEnClk_pulse <= 1'b1;  // 1?  ?   ?  ?   발생
+                wEnClk_pulse <= 1'b1;  
             end else begin
                 cnt_6p25     <= cnt_6p25 + 1'b1;
                 wEnClk_pulse <= 1'b0;
@@ -136,35 +95,45 @@ module cnn_laplacian_tft_top #(
     end
 
     // -------------------------------------------------------------------------
-    // [추가] FSM Controller Instance
+    // [수정] FSM Controller Instance (Hybrid Mode Support)
     // -------------------------------------------------------------------------
     wire w_core_start_trigger; 
-    wire w_is_active;          // FSM이 알려주는 Active 상태
-    wire [1:0] w_safe_imode;   // [중요] FSM이 타이밍 맞춰서 주는 모드값
+    wire w_is_active;          
+    
+    // [추가] 안전하게 동기화된 9개의 커널 값 (Flow Controller -> Conv)
+    wire signed [7:0] w_safe_k0, w_safe_k1, w_safe_k2;
+    wire signed [7:0] w_safe_k3, w_safe_k4, w_safe_k5;
+    wire signed [7:0] w_safe_k6, w_safe_k7, w_safe_k8;
     
     CNN_Flow_Controller u_flow_ctrl (
         .clk         (PL_CLK_100MHZ),
         .rst_n       (iRstn),
-        .i_imode     (iMode),      // VIO/AXI 값 (0:Bypass, 1:Sharp, 2:Edge, 3:Stop)
+        
+        // Control Inputs
+        .i_imode     (iMode),      // 0:Bypass, 1:Sharp, 2:Edge, 3:AXI User
         .i_frame_done(src_last),   
         
+        // AXI Kernel Inputs (32-bit signed)
+        .i_axi_k0(i_Kernel_value_0), .i_axi_k1(i_Kernel_value_1), .i_axi_k2(i_Kernel_value_2),
+        .i_axi_k3(i_Kernel_value_3), .i_axi_k4(i_Kernel_value_4), .i_axi_k5(i_Kernel_value_5),
+        .i_axi_k6(i_Kernel_value_6), .i_axi_k7(i_Kernel_value_7), .i_axi_k8(i_Kernel_value_8),
+
+        // Control Outputs
         .o_core_start(w_core_start_trigger),
-        .o_is_active (w_is_active), // Top의 is_processing_active 레지스터 대신 이걸 써도 됨
-        .o_safe_mode (w_safe_imode) // Conv 모듈에 넣을 값
+        .o_is_active (w_is_active), 
+        
+        // Safe Kernel Outputs (8-bit signed)
+        .o_safe_k0(w_safe_k0), .o_safe_k1(w_safe_k1), .o_safe_k2(w_safe_k2),
+        .o_safe_k3(w_safe_k3), .o_safe_k4(w_safe_k4), .o_safe_k5(w_safe_k5),
+        .o_safe_k6(w_safe_k6), .o_safe_k7(w_safe_k7), .o_safe_k8(w_safe_k8)
     );
 
     // -------------------------------------------------------------------------
-    // [추가] Processing Status Logic
+    // Processing Status & Start Control
     // -------------------------------------------------------------------------
     wire is_processing_active = w_is_active;
 
-
-    // -------------------------------------------------------------------------
-    // [수정] Processing Start Control (VSYNC 감지)
-    // -------------------------------------------------------------------------
-    // 리셋 직후 바로 읽지 않고, 카메라가 첫 프레임(VSYNC)을 시작하면 그때부터 읽기를 허용합니다.
     reg start_processing;
-    // 이후 FSM 으로  수정할 수 있는 신호 
 
     always @(posedge PL_CLK_100MHZ or negedge iRstn) begin
         if (!iRstn) begin
@@ -175,16 +144,15 @@ module cnn_laplacian_tft_top #(
                 start_processing <= 1'b1;
         end
     end
+
     // -------------------------------------------------------------------------
-    // 2) pixel_addr_ctrl (수정 및 선언부 확인 필수!)
+    // 2) pixel_addr_ctrl
     // -------------------------------------------------------------------------
-    
     always @(posedge PL_CLK_100MHZ or negedge iRstn) begin
         if (!iRstn) begin
             src_addr <= 17'd0;
             src_last <= 1'b0;
         end 
-        // 카운터 동작 조건: 클럭펄스 + 카메라 준비됨 + FSM Active
         else if (wEnClk_pulse && start_processing && is_processing_active) begin 
             if (src_addr == TOTAL_PIX - 1) begin
                 src_addr <= 17'd0;
@@ -194,36 +162,26 @@ module cnn_laplacian_tft_top #(
                 src_last <= 1'b0;
             end
         end else begin
-            // Active가 아니면 카운터 및 last 신호 초기화
             src_last <= 1'b0;
             if (!is_processing_active) src_addr <= 17'd0; 
         end
     end
 
-
     // -------------------------------------------------------------------------
-    // 3) InBuf
-    // ------------------------------------------------------------------------- 
+    // 3) InBuf (Double Buffering)
     // -------------------------------------------------------------------------
-    // [Double Buffer] Controller & Logic
-    // -------------------------------------------------------------------------
-    wire db_wr_sel; // 0 or 1
-    wire db_rd_sel; // 0 or 1
+    wire db_wr_sel; 
+    wire db_rd_sel; 
     
-    // 컨트롤러 인스턴스화
     buffer_controller u_buf_ctrl (
         .clk        (PL_CLK_100MHZ),
         .rstn       (iRstn),
-        .i_cam_vsync(CAMERA_VSYNC),        // 카메라 프레임 시작
-        .i_read_done(src_last), // CNN 읽기 한 프레임 완료 시점
+        .i_cam_vsync(CAMERA_VSYNC),        
+        .i_read_done(src_last), 
         .o_wr_sel   (db_wr_sel),
         .o_rd_sel   (db_rd_sel)
     );
 
-    // -------------------------------------------------------------------------
-    // 3) InBuf (Double Buffering 적용)
-    // -------------------------------------------------------------------------
-    
     // Camera Logic
     camera_to_ram CAMEARA_TO_RAM(
         .clk_i(CAMERA_PCLK),
@@ -236,90 +194,74 @@ module cnn_laplacian_tft_top #(
         .ram_wr_data_o(cam_wr_data_w)
     );
 
-    // MUX Logic for Writing (카메라 -> 버퍼)
     wire we_0, we_1;
     assign we_0 = (db_wr_sel == 1'b0) ? cam_wr_en_w : 1'b0;
     assign we_1 = (db_wr_sel == 1'b1) ? cam_wr_en_w : 1'b0;
 
-    // Buffer Outputs (16-bit Raw Data)
     wire [15:0] src_pixel_0;
     wire [15:0] src_pixel_1;
-    wire [15:0] src_pixel_raw; // MUX된 16bit 데이터
+    wire [15:0] src_pixel_raw; 
     
-    // MUX Logic for Reading
     assign src_pixel_raw = (db_rd_sel == 1'b0) ? src_pixel_0 : src_pixel_1;
 
-    // --- Buffer 0 Instance (16bit) ---
     InBuf #(
         .IMG_WIDTH (IMG_WIDTH), .IMG_HEIGHT (IMG_HEIGHT),
-        .DATA_WIDTH (16), .ADDR_WIDTH (17) // [수정] DATA_WIDTH 24->16
+        .DATA_WIDTH (16), .ADDR_WIDTH (17) 
     ) u_inbuf_0 (
         .iClk_wr   (CAMERA_PCLK),
         .iWe_wr    (we_0),
         .iAddr_wr  (cam_wr_addr_w),
-        .iData_wr  (cam_wr_data_w), // 16bit 입력
-
+        .iData_wr  (cam_wr_data_w), 
         .iClk_rd   (PL_CLK_100MHZ),
         .iRstn     (iRstn),
         .iEn_rd    (wEnClk),
         .iAddr_rd  (src_addr),
-        .oPixel    (src_pixel_0)    // 16bit 출력
+        .oPixel    (src_pixel_0)    
     );
 
-    // --- Buffer 1 Instance (16bit) ---
     InBuf #(
         .IMG_WIDTH (IMG_WIDTH), .IMG_HEIGHT (IMG_HEIGHT),
-        .DATA_WIDTH (16), .ADDR_WIDTH (17) // [수정] DATA_WIDTH 24->16
+        .DATA_WIDTH (16), .ADDR_WIDTH (17) 
     ) u_inbuf_1 (
         .iClk_wr   (CAMERA_PCLK),
         .iWe_wr    (we_1),
         .iAddr_wr  (cam_wr_addr_w),
-        .iData_wr  (cam_wr_data_w), // 16bit 입력
-
+        .iData_wr  (cam_wr_data_w), 
         .iClk_rd   (PL_CLK_100MHZ),
         .iRstn     (iRstn),
         .iEn_rd    (wEnClk),
         .iAddr_rd  (src_addr),
-        .oPixel    (src_pixel_1)    // 16bit 출력
+        .oPixel    (src_pixel_1)    
     );
 
-    // -------------------------------------------------------------------------
-    // [추가] 16-bit to 24-bit Expansion
-    // InBuf에서 나온 16bit(RGB565)를 window3x3에 넣기 위해 24bit(RGB888)로 확장
-    // -------------------------------------------------------------------------
+    // 16-bit RGB565 to 24-bit RGB888 Expansion
     wire [23:0] src_pixel_expanded;
-
     assign src_pixel_expanded = {
-        src_pixel_raw[15:11], 3'b000, // Red (5bit -> 8bit)
-        src_pixel_raw[10:5],  2'b00,  // Green (6bit -> 8bit)
-        src_pixel_raw[4:0],   3'b000  // Blue (5bit -> 8bit)
+        src_pixel_raw[15:11], 3'b000, // Red
+        src_pixel_raw[10:5],  2'b00,  // Green
+        src_pixel_raw[4:0],   3'b000  // Blue
     };
 
-
-    //----------------------------------------------------------------------------
-    // 4) window3x3 [핵심 수정 구간]
+    // -------------------------------------------------------------------------
+    // 4) window3x3 
     // -------------------------------------------------------------------------
     wire [215:0] wWindowData;
     wire wWinValid;
     
-    // [핵심 1] 실제로 RAM 주소가 증가하는(데이터 읽는) 순간을 정의
     wire w_ram_read_active;
     assign w_ram_read_active = wEnClk_pulse && start_processing && is_processing_active;
 
     reg [8:0] r_en_delay_chain; 
     wire      w_window_en_delayed_9clk;
     
-    // [핵심 2] wEnClk가 아니라 w_ram_read_active 신호를 9클럭 지연시킴
     always @(posedge PL_CLK_100MHZ or negedge iRstn) begin
         if (!iRstn) begin
             r_en_delay_chain <= 9'd0;
         end else begin
-            // 0번 비트에 현재 Active 상태를 넣고 왼쪽으로 Shift
             r_en_delay_chain <= {r_en_delay_chain[7:0], w_ram_read_active};
         end
     end
 
-    // 9클럭 전의 신호를 꺼내옴
     assign w_window_en_delayed_9clk = r_en_delay_chain[8];
 
     window3x3 #(
@@ -327,28 +269,34 @@ module cnn_laplacian_tft_top #(
     ) u_window3x3 (
         .iClk(PL_CLK_100MHZ), 
         .iRstn(iRstn), 
-        .iEn(w_window_en_delayed_9clk), // 지연된 신호 연결
+        .iEn(w_window_en_delayed_9clk), 
         .iPixel(src_pixel_expanded),
         .oWindow (wWindowData),
         .oValid(wWinValid)
     );
 
     // -------------------------------------------------------------------------
-    // 5) conv3x3
+    // 5) conv3x3_programmable_rgb [수정됨]
     // -------------------------------------------------------------------------
     wire [23:0] conv_pixel;
     wire conv_valid, conv_last;
 
-    conv3x3_laplacian_rgb #(.ACC_WIDTH(19)) u_conv3x3 (
+    // 기존 conv3x3 대신 programmable 버전을 사용
+    conv3x3_programmable_rgb #(.ACC_WIDTH(19)) u_conv3x3 (
         .iClk(PL_CLK_100MHZ), .iRstn(iRstn), .iEn(wEnClk),
-        .iMode(iMode),
         .iValid(wWinValid), .iLast(src_last),
         .iWindow (wWindowData),
+        
+        // [연결] Flow Controller가 주는 안전한 커널 값들
+        .iK00(w_safe_k0), .iK01(w_safe_k1), .iK02(w_safe_k2),
+        .iK10(w_safe_k3), .iK11(w_safe_k4), .iK12(w_safe_k5),
+        .iK20(w_safe_k6), .iK21(w_safe_k7), .iK22(w_safe_k8),
+        
         .oPixel(conv_pixel), .oValid(conv_valid), .oLast(conv_last)
     );
 
     // -------------------------------------------------------------------------
-    // 6) pixel_conv
+    // 6) pixel_conv (24bit -> 16bit)
     // -------------------------------------------------------------------------
     wire [15:0] pix565;
     wire pix_valid, pix_last;
@@ -360,15 +308,12 @@ module cnn_laplacian_tft_top #(
     );
 
     // -------------------------------------------------------------------------
-    // 7) OutBuf : Clock Domain      ( ߿ !)
-    //    - Write: wEnClk
-    //    - Read : wEnClk (   wLCD_Clk_sq    ??? wEnClk    ???)
+    // 7) OutBuf
     // -------------------------------------------------------------------------
     wire [16:0] ram_rd_addr;
     wire [15:0] ram_rd_data;
     wire        frame_done;
 
-    
     OutBuf #(
         .IMG_WIDTH  (IMG_WIDTH), .IMG_HEIGHT (IMG_HEIGHT),
         .DATA_WIDTH (16), .ADDR_WIDTH (17)
@@ -383,49 +328,27 @@ module cnn_laplacian_tft_top #(
         .oFrameDone(frame_done),
 
         // Read side
-        .iClk_rd   (wEnClk), //      ũ  и   ذ :      Enable Ŭ      ???
+        .iClk_rd   (wEnClk), 
         .iAddr_rd  (ram_rd_addr),
         .oData_rd  (ram_rd_data)
     );
-    
-
 
     // -------------------------------------------------------------------------
-    // 8) ram_to_lcd :               wEnClk,        Ŭ        ??? wLCD_Clk_sq
+    // 8) ram_to_lcd
     // -------------------------------------------------------------------------
-    
-    /*reg lcd_enable;
-
-    always @(posedge PL_CLK_100MHZ or negedge iRstn) begin
-        if (!iRstn)
-            lcd_enable <= 1'b0;
-        else if (frame_done)
-            lcd_enable <= 1'b1;
-    end
-    */
-
     ram_to_lcd u_ram_to_lcd (
         .clk_i(wEnClk_pulse),
-        //.iEnable(1'b1),
-
         .ram_rd_addr_o(ram_rd_addr),
         .ram_rd_data_i(ram_rd_data),
-
         .LCD_hsync_o(TFT_HSYNC),
         .LCD_vsync_o(TFT_VSYNC),
         .LCD_R_o(TFT_R_DATA),
         .LCD_G_o(TFT_G_DATA),
         .LCD_B_o(TFT_B_DATA)
-        
-         
     );
 
-    //     ٽ : LCD       ɿ     簢        Ŭ              
-    //      ʹ  wEnClk         غ      ???, LCD   wLCD_Clk_sq              
     assign TFT_DCLK = wEnClk; 
-
     assign TFT_BACKLIGHT = 1'b1;
-
     assign TFT_DE = 1'b1;
 
 endmodule

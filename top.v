@@ -6,12 +6,12 @@ module cnn_laplacian_tft_top #(
 )(
     input  wire        PL_CLK_100MHZ,
     input  wire        iRstn,
-    //input  wire [1:0]  iMode,
+    input  wire [1:0]  iMode,
 
     output wire [4:0]  TFT_R_DATA,
     output wire [5:0]  TFT_G_DATA,
     output wire [4:0]  TFT_B_DATA,
-    output wire        TFT_DCLK,     // LCD�� ������ ������ Ŭ�� (Square Wave)
+    output wire        TFT_DCLK,     // LCD                 Ŭ   (Square Wave)
     output wire        TFT_BACKLIGHT,
     output wire        TFT_DE,
 
@@ -32,7 +32,7 @@ module cnn_laplacian_tft_top #(
     output wire            CAMERA_PWDN,
     output wire            CAMERA_MCLK
 );
-    // VIO ?��?�� ?���??? ?���????��?�� ?��?��
+    // VIO ?  ?   ?   ??? ?   ????  ?   ?  ?  
     
     wire [1:0] mode_w;
     wire [15:0] h_sync_w;
@@ -76,16 +76,16 @@ module cnn_laplacian_tft_top #(
     reg [16:0] src_addr;
     reg        src_last;
 
-    wire [1:0] iMode = (mode_w  == 0) ? 0 : mode_w;
+    //wire [1:0] iMode = (mode_w  == 0) ? 0 : mode_w;
 
     // -------------------------------------------------------------------------
     // 1) Clock Generation
     // -------------------------------------------------------------------------
-    wire wEnClk;       // ������ (Pulse) - �ý��� ��ü ����ȭ Ŭ��
+    wire wEnClk;       //        (Pulse) -  ý      ü     ȭ Ŭ  
 
     clk_gen2 CLK_GEN_TFTLCD(
         .clk_i(PL_CLK_100MHZ),
-        .iRstn(iRstn),      // <- ����
+        .iRstn(iRstn),      // <-     
         .count_i(16'd7),
         .clk_o(wEnClk)
     );
@@ -116,8 +116,8 @@ module cnn_laplacian_tft_top #(
         .cam_sda                    (CAMERA_SCCB_SDA   )      
     );
 
-    // 100MHz -> 6.25MHz enable pulse ?��?��
-    reg [3:0] cnt_6p25;   // 16분주?�� 4bit 카운?��
+    // 100MHz -> 6.25MHz enable pulse ?  ?  
+    reg [3:0] cnt_6p25;   // 16분주?   4bit 카운?  
     reg       wEnClk_pulse;
 
     always @(posedge PL_CLK_100MHZ or negedge iRstn) begin
@@ -127,7 +127,7 @@ module cnn_laplacian_tft_top #(
         end else begin
             if (cnt_6p25 == 4'd15) begin
                 cnt_6p25     <= 4'd0;
-                wEnClk_pulse <= 1'b1;  // 1?��?�� ?��?�� 발생
+                wEnClk_pulse <= 1'b1;  // 1?  ?   ?  ?   발생
             end else begin
                 cnt_6p25     <= cnt_6p25 + 1'b1;
                 wEnClk_pulse <= 1'b0;
@@ -296,16 +296,39 @@ module cnn_laplacian_tft_top #(
     };
 
 
-    // -------------------------------------------------------------------------
-    // 4) window3x3
+    //----------------------------------------------------------------------------
+    // 4) window3x3 [핵심 수정 구간]
     // -------------------------------------------------------------------------
     wire [215:0] wWindowData;
     wire wWinValid;
+    
+    // [핵심 1] 실제로 RAM 주소가 증가하는(데이터 읽는) 순간을 정의
+    wire w_ram_read_active;
+    assign w_ram_read_active = wEnClk_pulse && start_processing && is_processing_active;
+
+    reg [8:0] r_en_delay_chain; 
+    wire      w_window_en_delayed_9clk;
+    
+    // [핵심 2] wEnClk가 아니라 w_ram_read_active 신호를 9클럭 지연시킴
+    always @(posedge PL_CLK_100MHZ or negedge iRstn) begin
+        if (!iRstn) begin
+            r_en_delay_chain <= 9'd0;
+        end else begin
+            // 0번 비트에 현재 Active 상태를 넣고 왼쪽으로 Shift
+            r_en_delay_chain <= {r_en_delay_chain[7:0], w_ram_read_active};
+        end
+    end
+
+    // 9클럭 전의 신호를 꺼내옴
+    assign w_window_en_delayed_9clk = r_en_delay_chain[8];
 
     window3x3 #(
         .IMG_WIDTH(IMG_WIDTH), .IMG_HEIGHT(IMG_HEIGHT), .DATA_WIDTH(24)
     ) u_window3x3 (
-        .iClk(PL_CLK_100MHZ), .iRstn(iRstn), .iEn(wEnClk), .iPixel(src_pixel_expanded),
+        .iClk(PL_CLK_100MHZ), 
+        .iRstn(iRstn), 
+        .iEn(w_window_en_delayed_9clk), // 지연된 신호 연결
+        .iPixel(src_pixel_expanded),
         .oWindow (wWindowData),
         .oValid(wWinValid)
     );
@@ -337,9 +360,9 @@ module cnn_laplacian_tft_top #(
     );
 
     // -------------------------------------------------------------------------
-    // 7) OutBuf : Clock Domain ���� (�߿�!)
+    // 7) OutBuf : Clock Domain      ( ߿ !)
     //    - Write: wEnClk
-    //    - Read : wEnClk (�� wLCD_Clk_sq ���??? wEnClk ���???)
+    //    - Read : wEnClk (   wLCD_Clk_sq    ??? wEnClk    ???)
     // -------------------------------------------------------------------------
     wire [16:0] ram_rd_addr;
     wire [15:0] ram_rd_data;
@@ -360,7 +383,7 @@ module cnn_laplacian_tft_top #(
         .oFrameDone(frame_done),
 
         // Read side
-        .iClk_rd   (wEnClk), // �� ��ũ �и� �ذ�: ���� Enable Ŭ�� ���???
+        .iClk_rd   (wEnClk), //      ũ  и   ذ :      Enable Ŭ      ???
         .iAddr_rd  (ram_rd_addr),
         .oData_rd  (ram_rd_data)
     );
@@ -368,7 +391,7 @@ module cnn_laplacian_tft_top #(
 
 
     // -------------------------------------------------------------------------
-    // 8) ram_to_lcd : ������ ������ wEnClk, ������ Ŭ�� �����??? wLCD_Clk_sq
+    // 8) ram_to_lcd :               wEnClk,        Ŭ        ??? wLCD_Clk_sq
     // -------------------------------------------------------------------------
     
     /*reg lcd_enable;
@@ -397,8 +420,8 @@ module cnn_laplacian_tft_top #(
          
     );
 
-    // �� �ٽ�: LCD ���� �ɿ��� �簢�� ���� Ŭ���� ���� ����
-    // �����ʹ� wEnClk�� ���� �غ������???, LCD�� wLCD_Clk_sq�� ���� ������
+    //     ٽ : LCD       ɿ     簢        Ŭ              
+    //      ʹ  wEnClk         غ      ???, LCD   wLCD_Clk_sq              
     assign TFT_DCLK = wEnClk; 
 
     assign TFT_BACKLIGHT = 1'b1;

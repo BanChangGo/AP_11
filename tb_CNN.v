@@ -35,11 +35,11 @@ module cnn_laplacian_tft_top_tb;
     wire         TFT_DE;
     wire         TFT_HSYNC;
     wire         TFT_VSYNC;
+    reg [1:0] iMode;
     
     // SCCB Pull-ups (I2C Simulation)
     assign (weak1, weak0) CAMERA_SCCB_SCL = 1'b1;
     assign (weak1, weak0) CAMERA_SCCB_SDA = 1'b1;
-
     // -----------------------------------------------------------
     // 2. DUT Instance (Device Under Test)
     // -----------------------------------------------------------
@@ -59,7 +59,7 @@ module cnn_laplacian_tft_top_tb;
         .TFT_DE          (TFT_DE),
         .TFT_HSYNC       (TFT_HSYNC),
         .TFT_VSYNC       (TFT_VSYNC),
-
+        .iMode (iMode),
         // Camera Interface
         .CAMERA_SCCB_SCL (CAMERA_SCCB_SCL),
         .CAMERA_SCCB_SDA (CAMERA_SCCB_SDA),
@@ -113,6 +113,7 @@ module cnn_laplacian_tft_top_tb;
         CAMERA_VSYNC = 0;
         CAMERA_HSYNC = 0;
         CAMERA_DATA  = 0;
+        iMode = 0;
 
         // Reset Release
         #100 iRstn = 1;

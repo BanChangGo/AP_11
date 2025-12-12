@@ -129,8 +129,8 @@ module ram_to_lcd(
         lcd_b <= ram_rd_data[15:11];
     end
     
-    assign LCD_R_o = lcd_r;
+    assign LCD_R_o = lcd_b;
     assign LCD_G_o = lcd_g;
-    assign LCD_B_o = lcd_b;
+    assign LCD_B_o = lcd_r;
     
 endmodule

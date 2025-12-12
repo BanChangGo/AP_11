@@ -195,7 +195,7 @@ module S_AXI_LITE_REG_CNN #(
     end 
     else if (reg_wren) begin
 
-      if (axi_awaddr[C_S_AXI_ADDR_WIDTH-1:0] == 32'hA000_0000)
+      if (axi_awaddr[C_S_AXI_ADDR_WIDTH-1:0] == 32'hA002_0000)
 	// Word access only !!!
         oReg0 <= S_AXI_WDATA[1:0];
         // Decribe other registers in here !!!
@@ -334,7 +334,7 @@ module S_AXI_LITE_REG_CNN #(
 
     // Address decoding for reading registers
     case (axi_araddr[C_S_AXI_ADDR_WIDTH-1:0] )
-      32'hA000_0000 : reg_data_out <= {30'h0, oReg0[1:0]};
+      32'hA002_0000 : reg_data_out <= {30'h0, oReg0[1:0]};
       default       : reg_data_out <=  32'h0;
     endcase
 
